@@ -1163,12 +1163,12 @@ export function syncSeasonWithCurrentRankings(season: Season, updatedPlayers: Pl
 // Calculate retirement chance for a player at the end of a season
 export function calculateRetirementChance(player: Player): number {
   if (player.id === 'ksenia-morey') return 0; // Protagonist career is in the player's hands
-  if (player.age < 30) return 0;
+  if (player.age < 36) return 0; // Первый возможный год выхода на пенсию — 36 лет
 
-  // Base chance at 30 is 2.0% (0.02)
-  // Each additional year adds +1.5% to +2.0% (0.0175 per year)
-  const yearsOver30 = player.age - 30;
-  let chance = 0.02 + yearsOver30 * 0.0175;
+  // Базовый минимальный шанс в 36 лет: 2.0% (0.02)
+  // Каждый дополнительный год старше 36 добавляет +1.5% - 2.0% (0.0175 в год)
+  const yearsOver36 = player.age - 36;
+  let chance = 0.02 + yearsOver36 * 0.0175;
 
   // Risk modifiers:
   // Persistent injury
@@ -1179,8 +1179,8 @@ export function calculateRetirementChance(player: Player): number {
   if ((player.fatigue || 0) >= 50) {
     chance += 0.02;
   }
-  // Veteran decline in rank: 33+ and outside top 50
-  if (player.age >= 33 && player.rank > 50) {
+  // Veteran decline in rank: 38+ and outside top 50
+  if (player.age >= 38 && player.rank > 50) {
     chance += 0.025;
   }
 
@@ -1302,7 +1302,7 @@ export function generateNextSeason(
   const survivingPlayers: Player[] = [];
 
   for (const p of players) {
-    // Check for retirement (>= 30 years old, 1-2% per year over 30)
+    // Check for retirement (>= 36 years old, minimal rate starting at 36)
     const retireChance = calculateRetirementChance(p);
     const rollsRetirement = retireChance > 0 && Math.random() < retireChance;
 

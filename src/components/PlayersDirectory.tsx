@@ -292,7 +292,7 @@ ${topWta.map(p => `  #${p.rank} ${p.name} (${p.country}) — ${p.points} pts [${
             </div>
           ) : (
             <div className="text-center py-16 bg-slate-900 border border-slate-800 rounded-2xl text-slate-400">
-              Пока ни один теннисист не завершил карьеру. С приближением к 30+ годам игроки будут взвешивать уход на пенсию в конце каждого сезона.
+              Пока ни один теннисист не завершил карьеру. С приближением к 36+ годам игроки будут взвешивать уход на пенсию в конце каждого сезона.
             </div>
           )}
         </div>
@@ -302,7 +302,7 @@ ${topWta.map(p => `  #${p.rank} ${p.name} (${p.country}) — ${p.points} pts [${
           {filteredPlayers.map(p => {
             const isAtp = p.tour === 'ATP';
             const isKsenia = p.id === 'ksenia-morey';
-            const isVeteran = p.age >= 30;
+            const isVeteran = p.age >= 36;
             const isNewGen = p.age <= 21;
             const retireChance = isVeteran ? calculateRetirementChance(p) : 0;
 

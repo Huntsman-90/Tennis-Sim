@@ -52,7 +52,7 @@ export function SeasonTransitionModal({ report, onClose }: SeasonTransitionModal
                 <HeartHandshake className="w-4 h-4 text-rose-400" />
                 <span>Завершили карьеру ({report.retiredPlayers.length})</span>
               </h3>
-              <span className="text-[11px] text-slate-400">Ветераны 30+ лет</span>
+              <span className="text-[11px] text-slate-400">Ветераны 36+ лет</span>
             </div>
 
             {report.retiredPlayers.length > 0 ? (
@@ -97,7 +97,7 @@ export function SeasonTransitionModal({ report, onClose }: SeasonTransitionModal
             ) : (
               <div className="p-4 rounded-xl bg-slate-950/40 border border-slate-800 text-xs text-slate-400 flex items-center gap-2">
                 <UserCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Все действующие ветераны тура (30+ лет) решили продолжить выступления и провести еще один сезон!</span>
+                <span>Все действующие ветераны тура (36+ лет) решили продолжить выступления и провести еще один сезон!</span>
               </div>
             )}
           </div>

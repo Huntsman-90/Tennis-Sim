@@ -164,14 +164,14 @@ export function PlayerProfileModal({
               </div>
 
               {/* Career Stage & Aging / Retirement Indicator */}
-              {player.age >= 30 ? (
+              {player.age >= 36 ? (
                 <div className="mt-2.5 px-3 py-2 rounded-xl bg-purple-950/40 border border-purple-500/30 flex items-center justify-between gap-3 text-xs">
                   <div className="flex items-center gap-2">
                     <Clock className="w-4 h-4 text-purple-400 shrink-0" />
                     <div>
                       <span className="font-bold text-purple-300">Статус: Ветеран тура ({player.age} лет)</span>
                       <p className="text-[11px] text-slate-400">
-                        {isKsenia ? 'Главная героиня — завершение карьеры только по решению игрока.' : 'С каждым годом после 30 возрастает вероятность ухода на пенсию.'}
+                        {isKsenia ? 'Главная героиня — завершение карьеры только по решению игрока.' : 'С каждым годом после 36 возрастает вероятность ухода на пенсию.'}
                       </p>
                     </div>
                   </div>
