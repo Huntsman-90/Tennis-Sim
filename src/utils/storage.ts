@@ -1,7 +1,8 @@
+import { ALL_INITIAL_PLAYERS } from '../data/players';
 import { getRealTourQualifier } from '../data/realTourQualifiers';
 import { deduplicateWeeklySeasonDraws } from '../engine/seasonManager';
 import { rollDailyForm } from '../engine/tennisEngine';
-import { Match, MatchStats, Player, SaveSlot, Season, Tournament } from '../types';
+import { Match, MatchStats, Player, SaveSlot, Season, Tournament, TourType } from '../types';
 
 const DB_NAME = 'tennis_pro_tour_db';
 const DB_VERSION = 2;
@@ -31,62 +32,85 @@ function createEmptyStats(): MatchStats {
 const globalSanitizeUsedNames = new Set<string>();
 
 /**
- * Automatically sanitizes any legacy placeholder player name (e.g. "Окленд Кандидат 5" or "Брисбен Квалификант 2")
+ * Checks if a player has a generic, synthetic or placeholder name (such as "Игрок Тура", "Окленд Кандидат 1", etc.)
+ */
+export function isGenericOrPlaceholderPlayer(player?: Player | null): boolean {
+  if (!player || !player.name) return true;
+  const name = player.name.trim();
+  if (name.length < 3) return true;
+  if (
+    /(Игрок Тура|Игрок|Tour Player|Unknown|Кандидат|Квалификант|Candidate|Qualifier|player_unknown)/i.test(
+      name
+    )
+  ) {
+    return true;
+  }
+  if (player.country === 'Тур' || player.flag === '🎾' || player.id === 'player_unknown') {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Automatically sanitizes any legacy placeholder player name (e.g. "Игрок Тура", "Окленд Кандидат 5", "Брисбен Квалификант 2")
  * into a genuine, authentic ATP/WTA professional tennis player.
  */
 export function sanitizePlayer(player: Player, usedSet?: Set<string> | unknown): Player {
   if (!player) return player;
-  const isSyntheticName = /(Кандидат|Квалификант|Candidate|Qualifier)/i.test(player.name);
-  if (isSyntheticName) {
-    const tour = player.tour || (player.id.toLowerCase().includes('atp') ? 'ATP' : 'WTA');
+  if (isGenericOrPlaceholderPlayer(player)) {
+    const tour: TourType =
+      player.tour ||
+      (player.id && player.id.toLowerCase().includes('wta') ? 'WTA' : 'ATP');
+
     let seedIdx = 0;
-    for (let i = 0; i < player.id.length; i++) {
-      seedIdx = (seedIdx * 31 + player.id.charCodeAt(i)) % 1000;
+    const seedSrc = (player.id || '') + (player.name || '') + (player.age || 22);
+    for (let i = 0; i < seedSrc.length; i++) {
+      seedIdx = (seedIdx * 31 + seedSrc.charCodeAt(i)) % 1000;
     }
     const tracking = usedSet instanceof Set ? (usedSet as Set<string>) : globalSanitizeUsedNames;
-    const realCandidate = getRealTourQualifier(tour, player.id, Math.abs(seedIdx), tracking);
+    const realCandidate = getRealTourQualifier(tour, player.id || `repaired_${seedIdx}`, Math.abs(seedIdx), tracking);
+
     player.name = realCandidate.name;
     player.nameEn = realCandidate.nameEn;
     player.country = realCandidate.country;
     player.flag = realCandidate.flag;
     player.age = realCandidate.age;
     player.rank = realCandidate.rank;
+    player.prevRank = realCandidate.prevRank || realCandidate.rank;
+    player.points = realCandidate.points || player.points || 150;
     player.style = realCandidate.style;
+    player.tour = tour;
     if (realCandidate.bio) player.bio = realCandidate.bio;
+    if (realCandidate.avatarColor) player.avatarColor = realCandidate.avatarColor;
   }
   return player;
 }
 
-function createFallbackPlayer(id: string): Player {
+export function createFallbackPlayer(id: string, preferredTour?: TourType): Player {
+  const cleanId = id || `fallback_player_${Date.now()}`;
+
+  // 1. Check if it's an initial player
+  const existingInitial = ALL_INITIAL_PLAYERS.find(p => p.id === cleanId);
+  if (existingInitial) {
+    return { ...existingInitial };
+  }
+
+  // 2. Determine tour
+  const lowerId = cleanId.toLowerCase();
+  const tour: TourType =
+    preferredTour ||
+    (lowerId.includes('wta') || lowerId.includes('female') ? 'WTA' : 'ATP');
+
+  // 3. Deterministic seed from id
+  let seedIdx = 0;
+  for (let i = 0; i < cleanId.length; i++) {
+    seedIdx = (seedIdx * 31 + cleanId.charCodeAt(i)) % 1000;
+  }
+
+  const realPlayer = getRealTourQualifier(tour, cleanId, Math.abs(seedIdx), globalSanitizeUsedNames);
   return {
-    id: id || 'player_unknown',
-    name: 'Игрок Тура',
-    tour: 'ATP',
-    country: 'Тур',
-    flag: '🎾',
-    age: 24,
-    rank: 100,
-    prevRank: 100,
-    points: 100,
-    style: 'Базлайнер',
-    favSurface: 'Хард',
-    rallyBonus: 0,
-    serveBonus: 0,
-    stats: {
-      serve: 3,
-      rally: 3,
-      forehand: 3,
-      backhand: 3,
-      stamina: 3,
-      mental: 3,
-    },
-    avatarColor: '#0284c7',
-    careerTitles: 0,
-    wins: 0,
-    losses: 0,
-    h2h: {},
-    fatigue: 0,
-    injury: null,
+    ...realPlayer,
+    id: cleanId,
   };
 }
 
@@ -95,7 +119,14 @@ function createFallbackPlayer(id: string): Player {
  */
 export function collectAllSeasonPlayers(season: Season, existingPlayers: Player[]): Player[] {
   const pMap = new Map<string, Player>();
-  existingPlayers.forEach(p => pMap.set(p.id, p));
+  ALL_INITIAL_PLAYERS.forEach(p => pMap.set(p.id, p));
+
+  if (Array.isArray(existingPlayers)) {
+    existingPlayers.forEach(p => {
+      const sp = sanitizePlayer(p);
+      pMap.set(sp.id, sp);
+    });
+  }
 
   if (season && Array.isArray(season.tournaments)) {
     for (const t of season.tournaments) {
@@ -204,7 +235,7 @@ export function serializeMatch(m: Match): any {
 /**
  * Deserializes a compact match back into a full Match object.
  */
-export function deserializeMatch(sm: any, playerMap: Map<string, Player>): Match {
+export function deserializeMatch(sm: any, playerMap: Map<string, Player>, tournamentTour?: TourType): Match {
   // If already full legacy match object
   if (sm.id && sm.player1 && typeof sm.player1 === 'object') {
     sanitizePlayer(sm.player1);
@@ -212,8 +243,21 @@ export function deserializeMatch(sm: any, playerMap: Map<string, Player>): Match
     return sm as Match;
   }
 
-  const p1 = sanitizePlayer(playerMap.get(sm.p1) || createFallbackPlayer(sm.p1));
-  const p2 = sanitizePlayer(playerMap.get(sm.p2) || createFallbackPlayer(sm.p2));
+  let p1 = playerMap.get(sm.p1);
+  if (!p1) {
+    p1 = createFallbackPlayer(sm.p1, tournamentTour);
+    playerMap.set(sm.p1, p1);
+  } else {
+    p1 = sanitizePlayer(p1);
+  }
+
+  let p2 = playerMap.get(sm.p2);
+  if (!p2) {
+    p2 = createFallbackPlayer(sm.p2, tournamentTour);
+    playerMap.set(sm.p2, p2);
+  } else {
+    p2 = sanitizePlayer(p2);
+  }
 
   const p1DailyForm = sm.df1 ? rollDailyForm(p1, sm.df1) : rollDailyForm(p1);
   const p2DailyForm = sm.df2 ? rollDailyForm(p2, sm.df2) : rollDailyForm(p2);
@@ -337,15 +381,42 @@ export function serializeSeason(season: Season): any {
 export function deserializeSeason(data: any, players: Player[]): Season {
   if (!data) return data;
 
+  // Pre-seed with all initial players first, then overlay with active players
+  const playerMap = new Map<string, Player>();
+  ALL_INITIAL_PLAYERS.forEach(p => playerMap.set(p.id, p));
+  if (Array.isArray(players)) {
+    players.forEach(p => {
+      if (p && p.id) {
+        playerMap.set(p.id, sanitizePlayer(p));
+      }
+    });
+  }
+
   // If already standard uncompacted format
   if (!data._v && data.tournaments && data.tournaments[0]?.matches?.[0]?.player1?.name) {
     const s = data as Season;
+    if (Array.isArray(s.tournaments)) {
+      for (const t of s.tournaments) {
+        if (Array.isArray(t.matches)) {
+          for (const m of t.matches) {
+            if (m.player1) sanitizePlayer(m.player1);
+            if (m.player2) sanitizePlayer(m.player2);
+          }
+        }
+        if (Array.isArray(t.qualifyingMatches)) {
+          for (const qm of t.qualifyingMatches) {
+            if (qm.player1) sanitizePlayer(qm.player1);
+            if (qm.player2) sanitizePlayer(qm.player2);
+          }
+        }
+        if (Array.isArray(t.luckyLosersPool)) {
+          t.luckyLosersPool = t.luckyLosersPool.map(p => sanitizePlayer(p));
+        }
+      }
+    }
     deduplicateWeeklySeasonDraws(s);
     return s;
   }
-
-  const playerMap = new Map<string, Player>();
-  players.forEach(p => playerMap.set(p.id, p));
 
   const season: Season = {
     year: data.year || 2026,
@@ -354,30 +425,40 @@ export function deserializeSeason(data: any, players: Player[]): Season {
     totalMatchesSimulated: data.totalMatchesSimulated || 0,
     retiredPlayersHistory: data.retiredPlayersHistory || [],
     lastTransitionReport: data.lastTransitionReport,
-    tournaments: (data.tournaments || []).map((t: any) => ({
-      id: t.id,
-      name: t.name,
-      nameRu: t.nameRu,
-      tour: t.tour,
-      city: t.city,
-      country: t.country,
-      flag: t.flag,
-      surface: t.surface,
-      category: t.category,
-      drawSize: t.drawSize,
-      pointsWinner: t.pointsWinner,
-      week: t.week,
-      month: t.month,
-      dates: t.dates,
-      completed: !!t.completed,
-      winnerPlayerId: t.winnerPlayerId,
-      currentRound: t.currentRound || 'Финал',
-      matches: (t.matches || []).map((m: any) => deserializeMatch(m, playerMap)),
-      qualifyingMatches: (t.qm || []).map((m: any) => deserializeMatch(m, playerMap)),
-      luckyLosersPool: (t.llp || []).map((id: string) => sanitizePlayer(playerMap.get(id) || createFallbackPlayer(id))),
-      withdrawals: t.wd || [],
-      qualifyingCompleted: t.qm && t.qm.length > 0,
-    })),
+    tournaments: (data.tournaments || []).map((t: any) => {
+      const tourType = t.tour as TourType;
+      return {
+        id: t.id,
+        name: t.name,
+        nameRu: t.nameRu,
+        tour: t.tour,
+        city: t.city,
+        country: t.country,
+        flag: t.flag,
+        surface: t.surface,
+        category: t.category,
+        drawSize: t.drawSize,
+        pointsWinner: t.pointsWinner,
+        week: t.week,
+        month: t.month,
+        dates: t.dates,
+        completed: !!t.completed,
+        winnerPlayerId: t.winnerPlayerId,
+        currentRound: t.currentRound || 'Финал',
+        matches: (t.matches || []).map((m: any) => deserializeMatch(m, playerMap, tourType)),
+        qualifyingMatches: (t.qm || []).map((m: any) => deserializeMatch(m, playerMap, tourType)),
+        luckyLosersPool: (t.llp || []).map((id: string) => {
+          let p = playerMap.get(id);
+          if (!p) {
+            p = createFallbackPlayer(id, tourType);
+            playerMap.set(id, p);
+          }
+          return sanitizePlayer(p);
+        }),
+        withdrawals: t.wd || [],
+        qualifyingCompleted: t.qm && t.qm.length > 0,
+      };
+    }),
   };
 
   deduplicateWeeklySeasonDraws(season);
@@ -649,8 +730,10 @@ export function loadInitialGameStateSync(
     // fallback
   }
 
+  const allLoadedPlayers = collectAllSeasonPlayers(loadedSeason, loadedPlayers);
+
   return {
-    players: loadedPlayers,
+    players: allLoadedPlayers,
     season: loadedSeason,
     slots: loadedSlots,
     hasSavedData,

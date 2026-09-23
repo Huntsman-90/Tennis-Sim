@@ -639,6 +639,18 @@ export function deduplicateWeeklySeasonDraws(season: Season): boolean {
       const weekSeenIds = new Set<string>();
 
       let repairCounter = 1;
+      const isPlaceholder = (p?: Player | null): boolean => {
+        if (!p || !p.name) return true;
+        const name = p.name.trim();
+        return (
+          name.length < 3 ||
+          /(Игрок Тура|Игрок|Tour Player|Unknown|Кандидат|Квалификант|Candidate|Qualifier|player_unknown)/i.test(name) ||
+          p.country === 'Тур' ||
+          p.flag === '🎾' ||
+          p.id === 'player_unknown'
+        );
+      };
+
       const getUniqueRepairPlayer = (context: string, surface: string): Player => {
         const seedStr = `rep_w${weekNum}_${context}_${repairCounter}`;
         const p = getRealTourQualifier(tourType, seedStr, repairCounter * 11, weekSeenNames);
@@ -659,6 +671,24 @@ export function deduplicateWeeklySeasonDraws(season: Season): boolean {
           for (let i = 0; i < t.matches.length; i++) {
             const m = t.matches[i];
             if (!m.player1 || !m.player2) continue;
+
+            // Fix any placeholder player in player1 or player2
+            if (isPlaceholder(m.player1)) {
+              const oldId = m.player1.id;
+              const freshP1 = getUniqueRepairPlayer(`main_placeholder_p1_${t.id}_${i}`, t.surface);
+              m.player1 = freshP1;
+              if (m.winnerId === oldId) m.winnerId = freshP1.id;
+              if (t.winnerPlayerId === oldId) t.winnerPlayerId = freshP1.id;
+              changesMade = true;
+            }
+            if (isPlaceholder(m.player2)) {
+              const oldId = m.player2.id;
+              const freshP2 = getUniqueRepairPlayer(`main_placeholder_p2_${t.id}_${i}`, t.surface);
+              m.player2 = freshP2;
+              if (m.winnerId === oldId) m.winnerId = freshP2.id;
+              if (t.winnerPlayerId === oldId) t.winnerPlayerId = freshP2.id;
+              changesMade = true;
+            }
 
             const isInitialRound = m.roundName === 'R32' || (t.drawSize === 8 && m.roundName === 'QF');
             if (!isInitialRound) continue;
@@ -730,6 +760,22 @@ export function deduplicateWeeklySeasonDraws(season: Season): boolean {
             const m = t.qualifyingMatches[i];
             if (!m.player1 || !m.player2) continue;
 
+            // Fix any placeholder player in qualification matches
+            if (isPlaceholder(m.player1)) {
+              const oldId = m.player1.id;
+              const freshP1 = getUniqueRepairPlayer(`qm_placeholder_p1_${t.id}_${i}`, t.surface);
+              m.player1 = freshP1;
+              if (m.winnerId === oldId) m.winnerId = freshP1.id;
+              changesMade = true;
+            }
+            if (isPlaceholder(m.player2)) {
+              const oldId = m.player2.id;
+              const freshP2 = getUniqueRepairPlayer(`qm_placeholder_p2_${t.id}_${i}`, t.surface);
+              m.player2 = freshP2;
+              if (m.winnerId === oldId) m.winnerId = freshP2.id;
+              changesMade = true;
+            }
+
             // Never mutate completed qualification matches
             if (m.isCompleted) {
               weekSeenNames.add(m.player1.name.toLowerCase());
@@ -774,12 +820,17 @@ export function deduplicateWeeklySeasonDraws(season: Season): boolean {
           }
         }
 
-        // Pass 3: Ensure luckyLosersPool has distinct names
+        // Pass 3: Ensure luckyLosersPool has distinct names and no placeholders
         if (Array.isArray(t.luckyLosersPool)) {
           const uniqueLL: Player[] = [];
           const seenLL = new Set<string>();
-          for (const p of t.luckyLosersPool) {
-            if (p && !seenLL.has(p.name.toLowerCase())) {
+          for (let li = 0; li < t.luckyLosersPool.length; li++) {
+            let p = t.luckyLosersPool[li];
+            if (!p || isPlaceholder(p)) {
+              p = getUniqueRepairPlayer(`ll_rep_${t.id}_${li}`, t.surface);
+              changesMade = true;
+            }
+            if (!seenLL.has(p.name.toLowerCase())) {
               seenLL.add(p.name.toLowerCase());
               uniqueLL.push(p);
             } else {

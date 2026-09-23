@@ -3,7 +3,7 @@ import { AlertCircle, Award, ChevronRight, Dices, Eye, FastForward, FileText, Tr
 import { advanceTournamentRound } from '../engine/seasonManager';
 import { simulateFullMatchInstantly } from '../engine/tennisEngine';
 import { Match, Season, Tournament } from '../types';
-import { ConfirmSimulationModal, SimulationType } from './ConfirmSimulationModal';
+import { sanitizePlayer } from '../utils/storage';
 
 interface TournamentBracketProps {
   tournament: Tournament;
@@ -28,23 +28,6 @@ export function TournamentBracket({
 }: TournamentBracketProps) {
   const roundOrder = tournament.drawSize === 8 ? ['QF', 'SF', 'F'] : ['R32', 'R16', 'QF', 'SF', 'F'];
   const [activeRoundTab, setActiveRoundTab] = useState<string>(tournament.currentRound || roundOrder[0]);
-
-  // Confirmation modal state for safe simulation
-  const [confirmModalData, setConfirmModalData] = useState<{
-    isOpen: boolean;
-    type: SimulationType;
-    title: string;
-    description: string;
-    details?: {
-      match?: Match;
-      roundName?: string;
-      tournamentName?: string;
-      unplayedCount?: number;
-      surface?: string;
-      tour?: string;
-    };
-    onConfirm: () => void;
-  } | null>(null);
 
   const matchesInRound =
     activeRoundTab === 'Q'
@@ -80,8 +63,8 @@ export function TournamentBracket({
   const nextTrn = season?.tournaments[nextTrnIndex];
   const isNextInSameWeek = Boolean(nextTrn && nextTrn.week === tournament.week);
 
-  // Execute single match simulation
-  const executeSimulateMatch = (match: Match) => {
+  // Execute single match simulation instantly without confirmation
+  const handleSimulateMatch = (match: Match) => {
     const simulated = simulateFullMatchInstantly({ ...match }, tournament.surface);
     const updatedMatches = tournament.matches.map(m => (m.id === match.id ? simulated : m));
     const updated = { ...tournament, matches: updatedMatches };
@@ -90,27 +73,8 @@ export function TournamentBracket({
     onTournamentUpdate(updated);
   };
 
-  // Safe simulation trigger with confirmation for single match
-  const handleRequestSimulateMatch = (match: Match) => {
-    setConfirmModalData({
-      isOpen: true,
-      type: 'match',
-      title: `Симулировать матч?`,
-      description: `Матч между ${match.player1.name} и ${match.player2.name} будет мгновенно рассчитан до победы одного из соперников с сохранением всех сетов и геймов. Результат сразу запишется в турнирную сетку и сохранится.`,
-      details: {
-        match,
-        surface: tournament.surface,
-        roundName: match.roundName,
-      },
-      onConfirm: () => {
-        executeSimulateMatch(match);
-        setConfirmModalData(null);
-      },
-    });
-  };
-
-  // Execute round simulation
-  const executeSimulateCurrentRound = () => {
+  // Execute round simulation instantly without confirmation
+  const handleSimulateCurrentRound = () => {
     const updatedMatches = tournament.matches.map(m => {
       if (m.roundName === activeRoundTab && !m.isCompleted) {
         return simulateFullMatchInstantly({ ...m }, tournament.surface);
@@ -126,30 +90,8 @@ export function TournamentBracket({
     onTournamentUpdate(updated);
   };
 
-  // Safe simulation trigger with confirmation for current round
-  const handleRequestSimulateCurrentRound = () => {
-    const unplayed = tournament.matches.filter(m => m.roundName === activeRoundTab && !m.isCompleted);
-    if (unplayed.length === 0) return;
-
-    setConfirmModalData({
-      isOpen: true,
-      type: 'round',
-      title: `Симулировать раунд (${getRoundDisplay(activeRoundTab)})?`,
-      description: `Все несыгранные матчи стадии (${unplayed.length} ${unplayed.length === 1 ? 'матч' : 'матчей'}) будут автоматически рассчитаны, победители выйдут в следующую стадию турнира, а прогресс будет надёжно сохранён.`,
-      details: {
-        roundName: activeRoundTab,
-        unplayedCount: unplayed.length,
-        tournamentName: tournament.nameRu,
-      },
-      onConfirm: () => {
-        executeSimulateCurrentRound();
-        setConfirmModalData(null);
-      },
-    });
-  };
-
-  // Execute full tournament simulation
-  const executeSimulateEntireTournament = () => {
+  // Execute full tournament simulation instantly without confirmation
+  const handleSimulateEntireTournament = () => {
     let current = { ...tournament };
     while (!current.completed) {
       const updatedMatches = current.matches.map(m => {
@@ -166,33 +108,13 @@ export function TournamentBracket({
     onTournamentUpdate(current);
   };
 
-  // Safe simulation trigger with confirmation for entire tournament
-  const handleRequestSimulateEntireTournament = () => {
-    const unplayedCount = tournament.matches.filter(m => !m.isCompleted).length;
-    if (unplayedCount === 0) return;
-
-    setConfirmModalData({
-      isOpen: true,
-      type: 'tournament',
-      title: `Симулировать весь турнир?`,
-      description: `Все оставшиеся матчи турнира (${unplayedCount} ${unplayedCount === 1 ? 'матч' : 'матчей'}) до самого финала будут автоматически рассчитаны. Чемпион получит трофей и ${tournament.pointsWinner} очков рейтинга, а данные игры будут сохранены.`,
-      details: {
-        tournamentName: `${tournament.tour} ${tournament.nameRu} (${tournament.city})`,
-        tour: tournament.tour,
-        unplayedCount,
-      },
-      onConfirm: () => {
-        executeSimulateEntireTournament();
-        setConfirmModalData(null);
-      },
-    });
-  };
-
   const finalMatch = tournament.matches.find(m => m.roundName === 'F');
   const champion = finalMatch?.winnerId
-    ? finalMatch.winnerId === finalMatch.player1.id
-      ? finalMatch.player1
-      : finalMatch.player2
+    ? sanitizePlayer(
+        finalMatch.winnerId === finalMatch.player1.id
+          ? finalMatch.player1
+          : finalMatch.player2
+      )
     : null;
 
   return (
@@ -243,9 +165,11 @@ export function TournamentBracket({
               // Extract winner if finished
               const fin = t.matches.find(m => m.roundName === 'F');
               const winPlayer = fin?.winnerId
-                ? fin.winnerId === fin.player1.id
-                  ? fin.player1
-                  : fin.player2
+                ? sanitizePlayer(
+                    fin.winnerId === fin.player1.id
+                      ? fin.player1
+                      : fin.player2
+                  )
                 : null;
 
               return (
@@ -446,7 +370,7 @@ export function TournamentBracket({
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   id="simulate-round-btn"
-                  onClick={handleRequestSimulateCurrentRound}
+                  onClick={handleSimulateCurrentRound}
                   className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <FastForward className="w-3.5 h-3.5 text-sky-400" />
@@ -455,7 +379,7 @@ export function TournamentBracket({
 
                 <button
                   id="simulate-entire-tournament-btn"
-                  onClick={handleRequestSimulateEntireTournament}
+                  onClick={handleSimulateEntireTournament}
                   className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-bold text-xs shadow-md shadow-orange-500/20 flex items-center gap-1.5 transition-all cursor-pointer"
                 >
                   <Zap className="w-3.5 h-3.5 fill-slate-950" />
@@ -588,8 +512,8 @@ export function TournamentBracket({
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             {matchesInRound.map(match => {
-              const p1 = match.player1;
-              const p2 = match.player2;
+              const p1 = sanitizePlayer(match.player1);
+              const p2 = sanitizePlayer(match.player2);
               const isKseniaMatch = p1.id === 'ksenia-morey' || p2.id === 'ksenia-morey';
               const p1Won = match.isCompleted && match.winnerId === p1.id;
               const p2Won = match.isCompleted && match.winnerId === p2.id;
@@ -841,9 +765,9 @@ export function TournamentBracket({
                         </button>
 
                         <button
-                          onClick={() => handleRequestSimulateMatch(match)}
+                          onClick={() => handleSimulateMatch(match)}
                           className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
-                          title="Быстрая симуляция матча с подтверждением"
+                          title="Быстрая симуляция матча"
                         >
                           <Zap className="w-3.5 h-3.5 fill-amber-300" />
                           Симулировать
@@ -857,19 +781,6 @@ export function TournamentBracket({
           </div>
         )}
       </div>
-
-      {/* Confirmation modal for safe simulations (match, round, tournament) */}
-      {confirmModalData && (
-        <ConfirmSimulationModal
-          isOpen={confirmModalData.isOpen}
-          type={confirmModalData.type}
-          title={confirmModalData.title}
-          description={confirmModalData.description}
-          details={confirmModalData.details}
-          onConfirm={confirmModalData.onConfirm}
-          onCancel={() => setConfirmModalData(null)}
-        />
-      )}
     </div>
   );
 }
