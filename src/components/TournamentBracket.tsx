@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { AlertCircle, Award, ChevronRight, Dices, Eye, FastForward, FileText, Trophy, Zap } from 'lucide-react';
 import { advanceTournamentRound } from '../engine/seasonManager';
 import { simulateFullMatchInstantly } from '../engine/tennisEngine';
@@ -26,23 +26,37 @@ export function TournamentBracket({
   onTournamentUpdate,
   onNextTournament,
 }: TournamentBracketProps) {
-  const roundOrder = tournament.drawSize === 8 ? ['QF', 'SF', 'F'] : ['R32', 'R16', 'QF', 'SF', 'F'];
-  const [activeRoundTab, setActiveRoundTab] = useState<string>(tournament.currentRound || roundOrder[0]);
+  const hasQual = Boolean(tournament.qualifyingMatches && tournament.qualifyingMatches.length > 0);
+  const qualRounds = ['Q-R32', 'Q-R16', 'Q-QF'];
+  const mainRounds = tournament.drawSize === 8 ? ['QF', 'SF', 'F'] : ['R32', 'R16', 'QF', 'SF', 'F'];
+  const roundOrder = hasQual ? [...qualRounds, ...mainRounds] : mainRounds;
 
-  const matchesInRound =
-    activeRoundTab === 'Q'
-      ? tournament.qualifyingMatches || []
-      : tournament.matches.filter(m => m.roundName === activeRoundTab);
+  const [activeRoundTab, setActiveRoundTab] = useState<string>(
+    tournament.currentRound || (hasQual && !tournament.qualifyingCompleted ? 'Q-R32' : mainRounds[0])
+  );
+
+  useEffect(() => {
+    if (tournament.currentRound) {
+      setActiveRoundTab(tournament.currentRound);
+    }
+  }, [tournament.id]);
+
+  const isQualRound = activeRoundTab.startsWith('Q-') || activeRoundTab === 'Q';
+  const matchesInRound = isQualRound
+    ? (tournament.qualifyingMatches || []).filter(m => activeRoundTab === 'Q' ? true : m.roundName === activeRoundTab)
+    : tournament.matches.filter(m => m.roundName === activeRoundTab);
   const isAtp = tournament.tour === 'ATP';
 
   const getRoundDisplay = (r: string) => {
-    if (r === 'Q') return 'Квалификация (Q-Finals)';
+    if (r === 'Q-R32') return 'Квал. 1/16 финала';
+    if (r === 'Q-R16') return 'Квал. 1/8 финала';
+    if (r === 'Q-QF' || r === 'Q') return 'Финал квалификации (1/4)';
     if (r === 'R64') return '1/32 финала';
     if (r === 'R32') return '1/16 финала';
     if (r === 'R16') return '1/8 финала';
     if (r === 'QF') return '1/4 финала';
     if (r === 'SF') return '1/2 финала';
-    if (r === 'F') return 'Финал';
+    if (r === 'F') return 'Финал 🏆';
     return r;
   };
 
@@ -79,24 +93,50 @@ export function TournamentBracket({
   const handleSimulateMatch = (match: Match) => {
     if (!isPlayableNow) return;
     const simulated = simulateFullMatchInstantly({ ...match }, tournament.surface);
-    const updatedMatches = tournament.matches.map(m => (m.id === match.id ? simulated : m));
-    const updated = { ...tournament, matches: updatedMatches };
+    const isQual = (tournament.qualifyingMatches || []).some(m => m.id === match.id);
+    let updated: Tournament;
+    if (isQual) {
+      const updatedQual = (tournament.qualifyingMatches || []).map(m => (m.id === match.id ? simulated : m));
+      updated = { ...tournament, qualifyingMatches: updatedQual };
+    } else {
+      const updatedMatches = tournament.matches.map(m => (m.id === match.id ? simulated : m));
+      updated = { ...tournament, matches: updatedMatches };
+    }
 
     advanceTournamentRound(updated);
+    if (updated.currentRound !== activeRoundTab && roundOrder.includes(updated.currentRound)) {
+      setActiveRoundTab(updated.currentRound);
+    }
     onTournamentUpdate(updated);
   };
 
   // Execute round simulation instantly without confirmation
   const handleSimulateCurrentRound = () => {
     if (!isPlayableNow) return;
-    const updatedMatches = tournament.matches.map(m => {
-      if (m.roundName === activeRoundTab && !m.isCompleted) {
-        return simulateFullMatchInstantly({ ...m }, tournament.surface);
+    const isQual = activeRoundTab.startsWith('Q-') || activeRoundTab === 'Q';
+    let updated: Tournament;
+    if (isQual) {
+      const updatedQual = (tournament.qualifyingMatches || []).map(m => {
+        if (m.roundName === activeRoundTab && !m.isCompleted) {
+          return simulateFullMatchInstantly({ ...m }, tournament.surface);
+        }
+        return m;
+      });
+      updated = { ...tournament, qualifyingMatches: updatedQual };
+    } else {
+      if (!tournament.qualifyingCompleted && tournament.qualifyingMatches && tournament.qualifyingMatches.length > 0) {
+        setActiveRoundTab(tournament.currentRound);
+        return;
       }
-      return m;
-    });
+      const updatedMatches = tournament.matches.map(m => {
+        if (m.roundName === activeRoundTab && !m.isCompleted) {
+          return simulateFullMatchInstantly({ ...m }, tournament.surface);
+        }
+        return m;
+      });
+      updated = { ...tournament, matches: updatedMatches };
+    }
 
-    const updated = { ...tournament, matches: updatedMatches };
     advanceTournamentRound(updated);
     if (updated.currentRound !== activeRoundTab && roundOrder.includes(updated.currentRound)) {
       setActiveRoundTab(updated.currentRound);
@@ -108,14 +148,26 @@ export function TournamentBracket({
   const handleSimulateEntireTournament = () => {
     if (!isPlayableNow) return;
     let current = { ...tournament };
-    while (!current.completed) {
-      const updatedMatches = current.matches.map(m => {
-        if (!m.isCompleted) {
-          return simulateFullMatchInstantly({ ...m }, current.surface);
-        }
-        return m;
-      });
-      current.matches = updatedMatches;
+    let safetyCounter = 0;
+    while (!current.completed && safetyCounter < 50) {
+      safetyCounter++;
+      if (current.qualifyingMatches && current.qualifyingMatches.length > 0 && !current.qualifyingCompleted) {
+        const updatedQual = current.qualifyingMatches.map(m => {
+          if (m.roundName === current.currentRound && !m.isCompleted) {
+            return simulateFullMatchInstantly({ ...m }, current.surface);
+          }
+          return m;
+        });
+        current.qualifyingMatches = updatedQual;
+      } else {
+        const updatedMatches = current.matches.map(m => {
+          if (m.roundName === current.currentRound && !m.isCompleted) {
+            return simulateFullMatchInstantly({ ...m }, current.surface);
+          }
+          return m;
+        });
+        current.matches = updatedMatches;
+      }
       const advanced = advanceTournamentRound(current);
       if (!advanced) break;
     }
@@ -427,27 +479,50 @@ export function TournamentBracket({
 
         {/* Round Navigation Tabs */}
         <div className="flex items-center gap-2 mt-5 border-t border-slate-800/80 pt-4 overflow-x-auto pb-1">
-          {/* Qualification Tab */}
-          {tournament.qualifyingMatches && tournament.qualifyingMatches.length > 0 && (
-            <button
-              id="round-tab-Q"
-              onClick={() => setActiveRoundTab('Q')}
-              className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-                activeRoundTab === 'Q'
-                  ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                  : 'bg-slate-800/80 text-emerald-300 hover:bg-slate-700 border border-emerald-500/30'
-              }`}
-            >
-              <span>🎾 Квалификация</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-emerald-950/80 text-emerald-300 font-black border border-emerald-500/40">
-                4 Финала
+          {/* Qualification Tabs */}
+          {hasQual && (
+            <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-slate-950/80 border border-emerald-500/20 shrink-0">
+              <span className="text-[10px] uppercase tracking-wider font-extrabold text-emerald-400 px-2 py-0.5">
+                🎾 Квал:
               </span>
-            </button>
+              {qualRounds.map(qr => {
+                const hasMatches = (tournament.qualifyingMatches || []).some(m => m.roundName === qr);
+                if (!hasMatches && qr !== 'Q-R32') return null;
+                const isCurrent = tournament.currentRound === qr && !tournament.completed;
+                const count = (tournament.qualifyingMatches || []).filter(m => m.roundName === qr).length;
+
+                return (
+                  <button
+                    key={qr}
+                    id={`round-tab-${qr}`}
+                    onClick={() => setActiveRoundTab(qr)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                      activeRoundTab === qr
+                        ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                        : 'bg-slate-800/80 text-emerald-300 hover:bg-slate-700 border border-emerald-500/30'
+                    }`}
+                  >
+                    <span>{getRoundDisplay(qr)}</span>
+                    {count > 0 && (
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded font-black ${
+                        activeRoundTab === qr ? 'bg-slate-950/30 text-slate-950' : 'bg-emerald-950 text-emerald-300'
+                      }`}>
+                        {count}
+                      </span>
+                    )}
+                    {isCurrent && (
+                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           )}
 
-          {roundOrder.map(r => {
+          {/* Main Draw Tabs */}
+          {mainRounds.map(r => {
             const hasMatches = tournament.matches.some(m => m.roundName === r);
-            if (!hasMatches && r !== roundOrder[0]) return null;
+            if (!hasMatches && r !== mainRounds[0]) return null;
 
             const isCurrent = tournament.currentRound === r && !tournament.completed;
 
@@ -475,6 +550,29 @@ export function TournamentBracket({
           })}
         </div>
       </div>
+
+      {/* Qualification In Progress Notice on Main Draw tabs */}
+      {!tournament.qualifyingCompleted && hasQual && !isQualRound && (
+        <div className="rounded-2xl bg-slate-900/95 border border-emerald-500/30 p-4 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl">🎾</span>
+            <div>
+              <h4 className="text-xs sm:text-sm font-bold text-emerald-300">
+                Квалификационный турнир продолжается
+              </h4>
+              <p className="text-xs text-slate-400">
+                Матчи квалификации ({getRoundDisplay(tournament.currentRound)}) определят 4 победителей [Q] для основной сетки.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveRoundTab(tournament.currentRound)}
+            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-600/20 transition-all cursor-pointer whitespace-nowrap"
+          >
+            Перейти к квалификации ({getRoundDisplay(tournament.currentRound)}) →
+          </button>
+        </div>
+      )}
 
       {/* Pre-tournament Withdrawals & Lucky Losers Notice Card */}
       {((tournament.withdrawals && tournament.withdrawals.length > 0) || (tournament.luckyLosersPool && tournament.luckyLosersPool.length > 0)) && (
@@ -796,6 +894,16 @@ export function TournamentBracket({
                         ) : (
                           <span>✓ Завершён в архиве</span>
                         )}
+                      </div>
+                    ) : !tournament.qualifyingCompleted && !isQualRound ? (
+                      <div className="w-full py-2 px-3 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-400 text-xs font-medium flex items-center justify-between gap-2">
+                        <span>⏳ Ожидает квалификацию</span>
+                        <button
+                          onClick={() => setActiveRoundTab(tournament.currentRound)}
+                          className="text-emerald-400 hover:text-emerald-300 font-bold underline cursor-pointer text-[11px]"
+                        >
+                          К квалификации →
+                        </button>
                       </div>
                     ) : (
                       <>

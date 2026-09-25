@@ -216,25 +216,39 @@ export default function App() {
   // If spectator tab is opened but no match is active, pick first pending match
   useEffect(() => {
     if (activeTab === 'match' && !activeSpectatorMatch) {
-      const firstPending = currentTournament.matches.find(m => !m.isCompleted);
-      if (firstPending) {
-        setActiveSpectatorMatch(firstPending);
-      } else if (currentTournament.matches.length > 0) {
-        setActiveSpectatorMatch(currentTournament.matches[0]);
+      const allMatches = [
+        ...(currentTournament.qualifyingMatches || []),
+        ...currentTournament.matches,
+      ];
+      const pendingMatch = allMatches.find(m => !m.isCompleted && m.roundName === currentTournament.currentRound) ||
+                           allMatches.find(m => !m.isCompleted) ||
+                           allMatches[0];
+      if (pendingMatch) {
+        setActiveSpectatorMatch(pendingMatch);
       }
     }
   }, [activeTab, activeSpectatorMatch, currentTournament]);
 
   // Handle completed match from spectator view
   const handleMatchCompleteFromViewer = (updatedMatch: Match) => {
-    const targetIdx = season.tournaments.findIndex(t => t.matches.some(m => m.id === updatedMatch.id));
+    const targetIdx = season.tournaments.findIndex(
+      t => t.matches.some(m => m.id === updatedMatch.id) ||
+           (t.qualifyingMatches && t.qualifyingMatches.some(m => m.id === updatedMatch.id))
+    );
     const resolvedIdx = targetIdx !== -1 ? targetIdx : season.currentTournamentIndex;
     let completedTrn: Tournament | null = null;
 
     const updatedTournaments = season.tournaments.map((trn, idx) => {
       if (idx !== resolvedIdx) return trn;
-      const updatedMatches = trn.matches.map(m => (m.id === updatedMatch.id ? updatedMatch : m));
-      const updated = { ...trn, matches: updatedMatches };
+      const isQual = (trn.qualifyingMatches || []).some(m => m.id === updatedMatch.id);
+      let updated: Tournament;
+      if (isQual) {
+        const updatedQual = (trn.qualifyingMatches || []).map(m => (m.id === updatedMatch.id ? updatedMatch : m));
+        updated = { ...trn, qualifyingMatches: updatedQual };
+      } else {
+        const updatedMatches = trn.matches.map(m => (m.id === updatedMatch.id ? updatedMatch : m));
+        updated = { ...trn, matches: updatedMatches };
+      }
       advanceTournamentRound(updated);
 
       if (updated.completed) {
