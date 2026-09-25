@@ -58,9 +58,12 @@ export function TournamentBracket({
   const currentActiveTrnIndex = season?.currentTournamentIndex ?? 0;
   const currentActiveTrn = season?.tournaments[currentActiveTrnIndex];
 
-  // Active week in season (week of first uncompleted tournament, or active tournament)
+  // Active week in season (week of active tournament, or first uncompleted tournament)
   const activeSeasonWeek = useMemo(() => {
     if (!season) return tournament.week;
+    if (currentActiveTrn && !currentActiveTrn.completed) {
+      return currentActiveTrn.week;
+    }
     const firstUncompleted = season.tournaments.find(t => !t.completed);
     return firstUncompleted ? firstUncompleted.week : (currentActiveTrn?.week ?? tournament.week);
   }, [season, currentActiveTrn, tournament.week]);
@@ -69,28 +72,38 @@ export function TournamentBracket({
     ? season.tournaments.findIndex(t => t.id === tournament.id)
     : 0;
 
-  // Check if a tournament has started any matches
-  const hasStartedMatches = (t: Tournament) => {
-    return t.matches.some(m => m.isCompleted) || (t.qualifyingMatches?.some(m => m.isCompleted) ?? false);
-  };
-
-  // Find if any tournament in this week is currently in progress (has completed matches, but is not completed yet)
+  // Check if any tournament in the active week is currently in progress (has completed matches, but is not finished)
   const tournamentInProgressInWeek = useMemo(() => {
-    return sameWeekTournaments.find(t => !t.completed && hasStartedMatches(t));
-  }, [sameWeekTournaments]);
-
-  // Is this tournament locked because another tournament in this week is currently in progress?
-  const isLockedByAnother = Boolean(
-    tournamentInProgressInWeek &&
-    tournamentInProgressInWeek.id !== tournament.id &&
-    !tournament.completed
-  );
+    if (!season) return null;
+    const found = season.tournaments.find(
+      t => t.week === activeSeasonWeek && !t.completed && (
+        t.matches.some(m => m.isCompleted) || (t.qualifyingMatches?.some(m => m.isCompleted) ?? false)
+      )
+    );
+    if (!found) return null;
+    const originalIndex = season.tournaments.findIndex(t => t.id === found.id);
+    return { ...found, originalIndex };
+  }, [season, activeSeasonWeek]);
 
   const isCurrentActive = !season || tournament.id === currentActiveTrn?.id;
   const isCurrentWeek = Boolean(season && tournament.week === activeSeasonWeek);
-  const isPlayableNow = Boolean(isCurrentWeek && !tournament.completed && !isLockedByAnother);
   const isArchived = Boolean(season && tournament.completed && !isCurrentActive);
   const isUpcomingFutureWeek = Boolean(season && !tournament.completed && tournament.week > activeSeasonWeek);
+
+  // A tournament is locked ONLY if another tournament in this week is currently in progress
+  const isLockedByAnother = Boolean(
+    tournamentInProgressInWeek &&
+    tournament.id !== tournamentInProgressInWeek.id &&
+    !tournament.completed
+  );
+
+  // Is this tournament playable right now?
+  // Current tournament is playable if in current week, not completed, and not locked by another tournament in progress
+  const isPlayableNow = Boolean(
+    !tournament.completed &&
+    isCurrentWeek &&
+    !isLockedByAnother
+  );
 
   // Other uncompleted tournaments in this week (excluding current one)
   const otherUncompletedThisWeek = useMemo(() => {
@@ -109,6 +122,9 @@ export function TournamentBracket({
 
   // Execute single match simulation instantly without confirmation
   const handleSimulateMatch = (match: Match) => {
+    if (!isCurrentActive && onSetCurrentTournament) {
+      onSetCurrentTournament(currentTrnOriginalIndex);
+    }
     const simulated = simulateFullMatchInstantly({ ...match }, tournament.surface);
     const updatedMatches = tournament.matches.map(m => (m.id === match.id ? simulated : m));
     const updated = { ...tournament, matches: updatedMatches };
@@ -119,6 +135,9 @@ export function TournamentBracket({
 
   // Execute round simulation instantly without confirmation
   const handleSimulateCurrentRound = () => {
+    if (!isCurrentActive && onSetCurrentTournament) {
+      onSetCurrentTournament(currentTrnOriginalIndex);
+    }
     const updatedMatches = tournament.matches.map(m => {
       if (m.roundName === activeRoundTab && !m.isCompleted) {
         return simulateFullMatchInstantly({ ...m }, tournament.surface);
@@ -136,6 +155,9 @@ export function TournamentBracket({
 
   // Execute full tournament simulation instantly without confirmation
   const handleSimulateEntireTournament = () => {
+    if (!isCurrentActive && onSetCurrentTournament) {
+      onSetCurrentTournament(currentTrnOriginalIndex);
+    }
     let current = { ...tournament };
     while (!current.completed) {
       const updatedMatches = current.matches.map(m => {
@@ -995,7 +1017,12 @@ export function TournamentBracket({
                     ) : (
                       <>
                         <button
-                          onClick={() => onSelectMatchToWatch(match)}
+                          onClick={() => {
+                            if (!isCurrentActive && onSetCurrentTournament) {
+                              onSetCurrentTournament(currentTrnOriginalIndex);
+                            }
+                            onSelectMatchToWatch(match);
+                          }}
                           className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/10 transition-colors cursor-pointer"
                         >
                           <Eye className="w-3.5 h-3.5" />
@@ -1003,7 +1030,12 @@ export function TournamentBracket({
                         </button>
 
                         <button
-                          onClick={() => handleSimulateMatch(match)}
+                          onClick={() => {
+                            if (!isCurrentActive && onSetCurrentTournament) {
+                              onSetCurrentTournament(currentTrnOriginalIndex);
+                            }
+                            handleSimulateMatch(match);
+                          }}
                           className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
                           title="Быстрая симуляция матча"
                         >

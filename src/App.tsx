@@ -267,10 +267,12 @@ export default function App() {
       // Re-seed upcoming unplayed tournaments with latest dynamic player rankings
       const syncedSeason = syncSeasonWithCurrentRankings({
         ...season,
+        currentTournamentIndex: targetIdx,
         tournaments: updatedTournaments,
         totalMatchesSimulated: totalSimulated,
       }, updatedPlayers);
       setSeason(syncedSeason);
+      setViewingTournamentIndex(null);
 
       // Save instantly to disk/localStorage after final match
       persistGameProgressImmediately(
@@ -281,10 +283,12 @@ export default function App() {
     } else {
       const nextSeason = {
         ...season,
+        currentTournamentIndex: targetIdx,
         tournaments: updatedTournaments,
         totalMatchesSimulated: totalSimulated,
       };
       setSeason(nextSeason);
+      setViewingTournamentIndex(null);
 
       // Save instantly to disk/localStorage after every single match
       persistGameProgressImmediately(
@@ -325,10 +329,12 @@ export default function App() {
       // Re-seed upcoming unplayed tournaments with latest dynamic player rankings
       const syncedSeason = syncSeasonWithCurrentRankings({
         ...season,
+        currentTournamentIndex: targetIdx,
         tournaments: updatedTournaments,
         totalMatchesSimulated: totalSimulated,
       }, updatedPlayers);
       setSeason(syncedSeason);
+      setViewingTournamentIndex(null);
 
       // Save instantly after simulated tournament completes
       persistGameProgressImmediately(
@@ -340,10 +346,12 @@ export default function App() {
       const completedCount = updatedTournament.matches.filter(m => m.isCompleted).length;
       const nextSeason = {
         ...season,
+        currentTournamentIndex: targetIdx,
         tournaments: updatedTournaments,
         totalMatchesSimulated: totalSimulated,
       };
       setSeason(nextSeason);
+      setViewingTournamentIndex(null);
 
       // Save instantly after match or round simulation
       persistGameProgressImmediately(
@@ -358,14 +366,27 @@ export default function App() {
   const handleSetCurrentTournament = (index: number) => {
     if (index < 0 || index >= season.tournaments.length) return;
 
-    // Check if the current tournament is in progress (has completed matches, but is not completed)
-    const curTrn = season.tournaments[season.currentTournamentIndex];
-    const isCurTrnInProgress = curTrn && !curTrn.completed && (
-      curTrn.matches.some(m => m.isCompleted) || (curTrn.qualifyingMatches?.some(m => m.isCompleted) ?? false)
+    // Find active week
+    const curActive = season.tournaments[season.currentTournamentIndex];
+    const activeWeek = (curActive && !curActive.completed)
+      ? curActive.week
+      : (season.tournaments.find(t => !t.completed)?.week ?? curActive?.week ?? 1);
+
+    // Check if any tournament in active week is currently in progress (has played matches and is NOT completed)
+    const tournamentInProgress = season.tournaments.find(
+      t => t.week === activeWeek && !t.completed && (
+        t.matches.some(m => m.isCompleted) || (t.qualifyingMatches?.some(m => m.isCompleted) ?? false)
+      )
     );
 
-    if (isCurTrnInProgress && index !== season.currentTournamentIndex) {
-      triggerSaveNotification(`🔒 Сначала завершите текущий турнир: ${curTrn.tour} ${curTrn.nameRu}!`);
+    const targetTrn = season.tournaments[index];
+
+    // If another tournament is in progress, only allow viewing the requested tournament
+    if (tournamentInProgress && targetTrn && targetTrn.id !== tournamentInProgress.id) {
+      triggerSaveNotification(`🔒 Сначала завершите текущий турнир: ${tournamentInProgress.tour} ${tournamentInProgress.nameRu}!`);
+      setViewingTournamentIndex(index);
+      setActiveSpectatorMatch(null);
+      setActiveTab('tournament');
       return;
     }
 
@@ -376,25 +397,13 @@ export default function App() {
     }));
     setActiveSpectatorMatch(null);
     setActiveTab('tournament');
-    const selectedTrn = season.tournaments[index];
-    if (selectedTrn) {
-      triggerSaveNotification(`Выбран турнир: ${selectedTrn.tour} ${selectedTrn.nameRu}`);
+    if (targetTrn) {
+      triggerSaveNotification(`Выбран турнир: ${targetTrn.tour} ${targetTrn.nameRu}`);
     }
   };
 
   // Next tournament in season (with support for choosing specific tournament or smart week progression)
   const handleNextTournament = (targetIndex?: number) => {
-    // Prevent skipping while a tournament is currently in progress
-    const curTrn = season.tournaments[season.currentTournamentIndex];
-    const isCurTrnInProgress = curTrn && !curTrn.completed && (
-      curTrn.matches.some(m => m.isCompleted) || (curTrn.qualifyingMatches?.some(m => m.isCompleted) ?? false)
-    );
-
-    if (isCurTrnInProgress && typeof targetIndex === 'number' && targetIndex !== season.currentTournamentIndex) {
-      triggerSaveNotification(`🔒 Сначала завершите текущий турнир: ${curTrn.tour} ${curTrn.nameRu}!`);
-      return;
-    }
-
     setViewingTournamentIndex(null);
     setActiveSpectatorMatch(null);
     setActiveTab('tournament');

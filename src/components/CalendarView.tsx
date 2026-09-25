@@ -16,8 +16,12 @@ export function CalendarView({ season, onSelectTournament, onSetCurrentTournamen
   const [searchQuery, setSearchQuery] = useState('');
 
   const activeSeasonWeek = useMemo(() => {
+    const curActive = season.tournaments[season.currentTournamentIndex];
+    if (curActive && !curActive.completed) {
+      return curActive.week;
+    }
     const firstUncompleted = season.tournaments.find(t => !t.completed);
-    return firstUncompleted ? firstUncompleted.week : (season.tournaments[season.currentTournamentIndex]?.week ?? 1);
+    return firstUncompleted ? firstUncompleted.week : (curActive?.week ?? 1);
   }, [season]);
 
   // Check if any tournament in the active week is currently in progress (has completed matches, but is not finished)
@@ -294,7 +298,7 @@ export function CalendarView({ season, onSelectTournament, onSetCurrentTournamen
                       )}
                     </div>
 
-                    {isCurrent && (
+                    {isCurrent && !isPast && (
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 animate-pulse">
                         Идёт сейчас
                       </span>
