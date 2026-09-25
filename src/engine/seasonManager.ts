@@ -217,7 +217,17 @@ export function repairTournamentBracket(tournament: Tournament, allPlayers: Play
 }
 
 export function repairSeasonState(season: SeasonState, allPlayers: Player[]): SeasonState {
-  const updatedTournaments = season.tournaments.map((t) => repairTournamentBracket(t, allPlayers));
+  const existingMap = new Map<string, Tournament>();
+  season.tournaments.forEach((t) => existingMap.set(t.id, t));
+
+  const updatedTournaments: Tournament[] = INITIAL_TOURNAMENTS_SCHEDULE.map((template) => {
+    if (existingMap.has(template.id)) {
+      return repairTournamentBracket(existingMap.get(template.id)!, allPlayers);
+    } else {
+      return generateTournamentDraw(template, allPlayers, false);
+    }
+  });
+
   return {
     ...season,
     tournaments: updatedTournaments,

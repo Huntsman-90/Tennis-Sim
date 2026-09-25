@@ -1,6 +1,6 @@
 export type TourType = 'ATP' | 'WTA';
 
-export type SurfaceType = 'Hard' | 'Clay' | 'Grass' | 'Indoor Hard';
+export type SurfaceType = 'Hard' | 'Clay' | 'Grass' | 'Indoor Hard' | 'Indoor Clay';
 
 export type TournamentCategory = 'Grand Slam' | 'Masters 1000' | 'WTA 1000' | 'ATP 500' | 'WTA 500' | 'ATP 250' | 'WTA 250' | 'ATP Finals' | 'WTA Finals';
 
@@ -104,7 +104,7 @@ export interface Tournament {
   category: TournamentCategory;
   surface: SurfaceType;
   week: number;
-  drawSize: 16 | 32 | 64 | 128;
+  drawSize: number;
   setsToWin: 2 | 3; // Best of 3 or Best of 5 (Men's Grand Slams)
   pointsWinner: number;
   pointsFinalist: number;
