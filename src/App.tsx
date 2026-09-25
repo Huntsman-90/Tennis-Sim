@@ -4,6 +4,7 @@ import { CalendarView } from './components/CalendarView';
 import { MatchStatsCardModal } from './components/MatchStatsCardModal';
 import { MatchViewer } from './components/MatchViewer';
 import { ActiveTab, Navbar } from './components/Navbar';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { PlayerProfileModal } from './components/PlayerProfileModal';
 import { PlayersDirectory } from './components/PlayersDirectory';
 import { RankingsTable } from './components/RankingsTable';
@@ -610,6 +611,9 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Offline Connectivity Status Indicator */}
+      <OfflineIndicator />
 
     </div>
   );

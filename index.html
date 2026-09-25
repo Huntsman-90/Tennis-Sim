@@ -1,18 +1,32 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Большой Теннис: ATP &amp; WTA Тур</title>
     <meta name="description" content="Полноценный симулятор теннисного сезона с реальными правилами посева (разведение топ-игроков по сетке), динамическим пересчетом рейтинга ATP/WTA после турниров, поочередным проведением турниров, зрительским режимом и слотами сохранений." />
+    
+    <!-- PWA & Mobile Web App Meta Tags -->
+    <meta name="theme-color" content="#090d16" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Теннис Тур" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/pwa-512x512.png" />
+
+    <!-- Open Graph & Social Cards -->
     <meta property="og:title" content="Большой Теннис: ATP &amp; WTA Тур" />
     <meta property="og:description" content="Полноценный симулятор теннисного сезона с реальными правилами посева (разведение топ-игроков по сетке), динамическим пересчетом рейтинга ATP/WTA после турниров, поочередным проведением турниров, зрительским режимом и слотами сохранений." />
+    <meta property="og:image" content="/pwa-512x512.png" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="/pwa-512x512.png" />
   </head>
-  <body>
+  <body class="bg-slate-950 text-slate-100 antialiased selection:bg-emerald-500 selection:text-slate-950 overflow-x-hidden">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

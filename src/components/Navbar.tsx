@@ -1,5 +1,6 @@
 import { Calendar, Eye, Trophy, Users, Zap, HardDrive } from 'lucide-react';
 import { Tournament } from '../types';
+import { PWAInstallButton } from './PWAInstallButton';
 
 export type ActiveTab = 'tournament' | 'match' | 'rankings' | 'calendar' | 'players';
 
@@ -29,8 +30,13 @@ export function Navbar({
           
           {/* Logo & Tour Title */}
           <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-emerald-500 via-sky-500 to-indigo-600 flex items-center justify-center text-base sm:text-xl shadow-lg shadow-sky-500/20 shrink-0">
-              🎾
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl overflow-hidden shadow-lg shadow-sky-500/20 shrink-0 flex items-center justify-center bg-slate-900 border border-sky-500/30">
+              <img
+                src="/app-logo.png"
+                alt="ATP & WTA Tour Logo"
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
             </div>
             <div>
               <div className="flex items-center gap-1.5 sm:gap-2">
@@ -149,6 +155,9 @@ export function Navbar({
                 <span className="hidden sm:inline">Игроки</span>
               </button>
             </nav>
+
+            {/* In-app PWA Install Button */}
+            <PWAInstallButton />
 
             {/* Quick Saves Button */}
             <button
