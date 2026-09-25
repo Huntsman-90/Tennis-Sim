@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { AlertCircle, Award, ChevronRight, Dices, Eye, FastForward, FileText, Trophy, Zap } from 'lucide-react';
 import { advanceTournamentRound } from '../engine/seasonManager';
 import { simulateFullMatchInstantly } from '../engine/tennisEngine';
@@ -9,17 +9,19 @@ interface TournamentBracketProps {
   tournament: Tournament;
   season?: Season;
   onSelectTournament?: (index: number) => void;
+  onSetCurrentTournament?: (index: number) => void;
   onSelectMatchToWatch: (match: Match) => void;
   onSelectMatchCard: (match: Match) => void;
   onSelectPlayer: (playerId: string) => void;
   onTournamentUpdate: (updatedTournament: Tournament) => void;
-  onNextTournament: () => void;
+  onNextTournament: (targetIndex?: number) => void;
 }
 
 export function TournamentBracket({
   tournament,
   season,
   onSelectTournament,
+  onSetCurrentTournament,
   onSelectMatchToWatch,
   onSelectMatchCard,
   onSelectPlayer,
@@ -55,13 +57,55 @@ export function TournamentBracket({
 
   const currentActiveTrnIndex = season?.currentTournamentIndex ?? 0;
   const currentActiveTrn = season?.tournaments[currentActiveTrnIndex];
-  const isCurrentActive = !season || tournament.id === currentActiveTrn?.id;
-  const isArchived = Boolean(season && tournament.completed && !isCurrentActive);
-  const isUpcoming = Boolean(season && !tournament.completed && !isCurrentActive);
 
-  const nextTrnIndex = (season?.currentTournamentIndex ?? 0) + 1;
-  const nextTrn = season?.tournaments[nextTrnIndex];
-  const isNextInSameWeek = Boolean(nextTrn && nextTrn.week === tournament.week);
+  // Active week in season (week of first uncompleted tournament, or active tournament)
+  const activeSeasonWeek = useMemo(() => {
+    if (!season) return tournament.week;
+    const firstUncompleted = season.tournaments.find(t => !t.completed);
+    return firstUncompleted ? firstUncompleted.week : (currentActiveTrn?.week ?? tournament.week);
+  }, [season, currentActiveTrn, tournament.week]);
+
+  const currentTrnOriginalIndex = season
+    ? season.tournaments.findIndex(t => t.id === tournament.id)
+    : 0;
+
+  // Check if a tournament has started any matches
+  const hasStartedMatches = (t: Tournament) => {
+    return t.matches.some(m => m.isCompleted) || (t.qualifyingMatches?.some(m => m.isCompleted) ?? false);
+  };
+
+  // Find if any tournament in this week is currently in progress (has completed matches, but is not completed yet)
+  const tournamentInProgressInWeek = useMemo(() => {
+    return sameWeekTournaments.find(t => !t.completed && hasStartedMatches(t));
+  }, [sameWeekTournaments]);
+
+  // Is this tournament locked because another tournament in this week is currently in progress?
+  const isLockedByAnother = Boolean(
+    tournamentInProgressInWeek &&
+    tournamentInProgressInWeek.id !== tournament.id &&
+    !tournament.completed
+  );
+
+  const isCurrentActive = !season || tournament.id === currentActiveTrn?.id;
+  const isCurrentWeek = Boolean(season && tournament.week === activeSeasonWeek);
+  const isPlayableNow = Boolean(isCurrentWeek && !tournament.completed && !isLockedByAnother);
+  const isArchived = Boolean(season && tournament.completed && !isCurrentActive);
+  const isUpcomingFutureWeek = Boolean(season && !tournament.completed && tournament.week > activeSeasonWeek);
+
+  // Other uncompleted tournaments in this week (excluding current one)
+  const otherUncompletedThisWeek = useMemo(() => {
+    return sameWeekTournaments.filter(t => !t.completed && t.id !== tournament.id);
+  }, [sameWeekTournaments, tournament.id]);
+
+  // Next week tournaments (when current week completes)
+  const nextWeekTournaments = useMemo(() => {
+    if (!season) return [];
+    const nextUncomp = season.tournaments.find(t => !t.completed && t.week > tournament.week);
+    if (!nextUncomp) return [];
+    return season.tournaments
+      .map((t, idx) => ({ ...t, originalIndex: idx }))
+      .filter(t => t.week === nextUncomp.week);
+  }, [season, tournament.week]);
 
   // Execute single match simulation instantly without confirmation
   const handleSimulateMatch = (match: Match) => {
@@ -119,7 +163,7 @@ export function TournamentBracket({
 
   return (
     <div id="tournament-bracket-view" className="space-y-4 sm:space-y-6">
-      {/* Week Tournaments Sequence Banner (Playing in sequence, no shared players) */}
+      {/* Week Tournaments Sequence Banner (Choose any tournament of the current week) */}
       {sameWeekTournaments.length > 1 && (
         <div className="rounded-2xl bg-slate-900/95 border border-slate-800 p-4 shadow-xl space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
@@ -130,14 +174,14 @@ export function TournamentBracket({
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h2 className="text-sm font-bold text-white">
-                    Неделя {tournament.week} ({tournament.dates}) • Турниры играются по очереди
+                    Неделя {tournament.week} ({tournament.dates}) • Турниры текущей недели
                   </h2>
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                     {sameWeekTournaments.length} турнира в неделю
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Турниры проводятся последовательно. Составы участников разделены — каждый теннисист выступает строго в одном турнире недели.
+                  Турниры текущей недели. Вы можете выбрать любой турнир недели для проведения в удобном вам порядке.
                 </p>
               </div>
             </div>
@@ -146,21 +190,26 @@ export function TournamentBracket({
             {!isCurrentActive && currentActiveTrn && onSelectTournament && (
               <button
                 onClick={() => onSelectTournament(currentActiveTrnIndex)}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer shrink-0 self-start sm:self-auto"
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer shrink-0 self-start sm:self-auto"
               >
-                К текущему турниру ({currentActiveTrn.tour} {currentActiveTrn.city}) →
+                К активному турниру ({currentActiveTrn.tour} {currentActiveTrn.city}) →
               </button>
             )}
           </div>
 
-          {/* Sequential tournament queue list */}
+          {/* Tournament selection cards list for the week */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             {sameWeekTournaments.map((t, idx) => {
               const isViewingThis = t.id === tournament.id;
               const isActiveInSeason = season && season.currentTournamentIndex === t.originalIndex;
               const isFinished = t.completed;
               const isAtpItem = t.tour === 'ATP';
-              const orderNum = idx + 1;
+              const isThisLocked = Boolean(
+                tournamentInProgressInWeek &&
+                t.id !== tournamentInProgressInWeek.id &&
+                !t.completed
+              );
+              const isThisPlayable = isCurrentWeek && !isFinished && !isThisLocked;
 
               // Extract winner if finished
               const fin = t.matches.find(m => m.roundName === 'F');
@@ -176,7 +225,13 @@ export function TournamentBracket({
                 <button
                   key={t.id}
                   id={`week-tournament-seq-${idx}`}
-                  onClick={() => onSelectTournament && onSelectTournament(t.originalIndex)}
+                  onClick={() => {
+                    if (isThisPlayable && onSetCurrentTournament) {
+                      onSetCurrentTournament(t.originalIndex);
+                    } else if (onSelectTournament) {
+                      onSelectTournament(t.originalIndex);
+                    }
+                  }}
                   className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 relative overflow-hidden ${
                     isViewingThis
                       ? isAtpItem
@@ -184,6 +239,10 @@ export function TournamentBracket({
                         : 'bg-rose-950/40 border-rose-400 ring-2 ring-rose-400/40 shadow-lg'
                       : isActiveInSeason
                       ? 'bg-emerald-950/30 border-emerald-500/70 hover:border-emerald-400'
+                      : isThisPlayable
+                      ? 'bg-slate-900/80 border-slate-700 hover:border-sky-500/60 shadow-sm'
+                      : isThisLocked
+                      ? 'bg-slate-950/50 border-slate-900/80 opacity-60'
                       : isFinished
                       ? 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
                       : 'bg-slate-950/60 border-slate-900 hover:border-slate-800 opacity-75'
@@ -191,7 +250,7 @@ export function TournamentBracket({
                 >
                   <div className="flex items-center justify-between gap-1 w-full">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      Очередь #{orderNum}
+                      Турнир #{idx + 1}
                     </span>
 
                     {isActiveInSeason ? (
@@ -203,9 +262,17 @@ export function TournamentBracket({
                       <span className="text-[10px] font-semibold text-emerald-400 flex items-center gap-1">
                         ✓ Завершён
                       </span>
+                    ) : isThisLocked ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-400 border border-slate-700/60 flex items-center gap-1">
+                        🔒 Заблокирован
+                      </span>
+                    ) : isThisPlayable ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30 flex items-center gap-1">
+                        ▶ Доступен
+                      </span>
                     ) : (
                       <span className="text-[10px] text-slate-500 font-medium">
-                        В очереди ⏳
+                        Неделя #{t.week} ⏳
                       </span>
                     )}
                   </div>
@@ -247,22 +314,48 @@ export function TournamentBracket({
               <div className="text-xs text-slate-300 flex items-center gap-2">
                 {isArchived ? (
                   <span>
-                    ℹ️ <strong>Архив:</strong> Этот турнир недели уже сыгран. Результаты зафиксированы.
+                    ℹ️ <strong>Архив:</strong> Этот турнир уже сыгран. Результаты зафиксированы в рейтингах.
+                  </span>
+                ) : isLockedByAnother ? (
+                  <span>
+                    🔒 <strong>Блокировка:</strong> Этот турнир заблокирован, так как сейчас идёт турнир <strong>{tournamentInProgressInWeek?.tour} {tournamentInProgressInWeek?.nameRu}</strong>. Завершите его, чтобы разблокировать этот турнир.
+                  </span>
+                ) : isPlayableNow ? (
+                  <span>
+                    🎾 <strong>Выбор турнира:</strong> Этот турнир проводится на текущей неделе #{tournament.week}. Вы можете сделать его активным и играть прямо сейчас.
                   </span>
                 ) : (
                   <span>
-                    ⏳ <strong>Очередь:</strong> Этот турнир начнётся по очереди, когда завершится текущий турнир недели ({currentActiveTrn?.tour} {currentActiveTrn?.city}).
+                    ⏳ <strong>Будущая неделя:</strong> Этот турнир начнётся на неделе #{tournament.week} (сейчас идёт неделя #{activeSeasonWeek}).
                   </span>
                 )}
               </div>
-              {currentActiveTrn && onSelectTournament && (
-                <button
-                  onClick={() => onSelectTournament(currentActiveTrnIndex)}
-                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer self-start sm:self-auto shrink-0"
-                >
-                  Перейти к текущему турниру →
-                </button>
-              )}
+              <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                {isLockedByAnother && onSelectTournament && tournamentInProgressInWeek && (
+                  <button
+                    onClick={() => onSelectTournament(tournamentInProgressInWeek.originalIndex)}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1"
+                  >
+                    К активному ({tournamentInProgressInWeek.tour} {tournamentInProgressInWeek.city}) →
+                  </button>
+                )}
+                {!isLockedByAnother && isPlayableNow && onSetCurrentTournament && (
+                  <button
+                    onClick={() => onSetCurrentTournament(currentTrnOriginalIndex)}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1"
+                  >
+                    ▶ Играть этот турнир недели
+                  </button>
+                )}
+                {!isLockedByAnother && currentActiveTrn && onSelectTournament && (
+                  <button
+                    onClick={() => onSelectTournament(currentActiveTrnIndex)}
+                    className="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                  >
+                    К активному ({currentActiveTrn.tour} {currentActiveTrn.city}) →
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -312,57 +405,194 @@ export function TournamentBracket({
             </div>
           </div>
 
-          {/* Tournament Actions / Champion Badge */}
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Tournament Actions / Champion Badge & Next Tournament Selection */}
+          <div className="w-full md:w-auto flex flex-col gap-2">
             {tournament.completed && champion ? (
-              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center gap-3 flex-wrap sm:flex-nowrap">
-                <Trophy className="w-6 h-6 text-amber-400 shrink-0" />
-                <div>
-                  <div className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">
-                    {isAtp ? 'Победитель турнира' : 'Победительница турнира'}
-                  </div>
-                  <div className="text-sm font-bold text-white flex items-center gap-1.5 cursor-pointer hover:underline" onClick={() => onSelectPlayer(champion.id)}>
-                    <span>{champion.flag}</span>
-                    <span>{champion.name}</span>
+              <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex flex-col gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Trophy className="w-6 h-6 text-amber-400 shrink-0" />
+                  <div>
+                    <div className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">
+                      {isAtp ? 'Победитель турнира' : 'Победительница турнира'}
+                    </div>
+                    <div className="text-sm font-bold text-white flex items-center gap-1.5 cursor-pointer hover:underline" onClick={() => onSelectPlayer(champion.id)}>
+                      <span>{champion.flag}</span>
+                      <span>{champion.name}</span>
+                    </div>
                   </div>
                 </div>
 
-                {isCurrentActive ? (
-                  <button
-                    id="next-tournament-btn"
-                    onClick={onNextTournament}
-                    className="ml-auto px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 transition-all cursor-pointer flex items-center gap-1.5"
-                  >
-                    <span>
-                      {isNextInSameWeek && nextTrn
-                        ? `След. турнир недели (${nextTrn.tour} ${nextTrn.city}) →`
-                        : nextTrn
-                        ? `Неделя ${tournament.week} завершена! Неделя ${nextTrn.week} (${nextTrn.tour} ${nextTrn.city}) →`
-                        : `Завершить сезон ${season?.year} →`}
-                    </span>
-                  </button>
+                {/* Multiple tournaments choice for current week */}
+                {otherUncompletedThisWeek.length > 0 ? (
+                  <div className="pt-2.5 border-t border-amber-500/20 space-y-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                        <span>🎾</span>
+                        <span>Выберите следующий турнир недели #{tournament.week}:</span>
+                      </span>
+                      <button
+                        id="next-tournament-btn"
+                        onClick={() => onNextTournament(otherUncompletedThisWeek[0].originalIndex)}
+                        className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
+                      >
+                        След. по списку ({otherUncompletedThisWeek[0].tour} {otherUncompletedThisWeek[0].city}) →
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {otherUncompletedThisWeek.map(nextT => (
+                        <button
+                          key={nextT.id}
+                          onClick={() => {
+                            if (onSetCurrentTournament) onSetCurrentTournament(nextT.originalIndex);
+                            else onNextTournament(nextT.originalIndex);
+                          }}
+                          className="p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-emerald-500/70 transition-all cursor-pointer text-left flex items-center justify-between gap-2 group"
+                        >
+                          <div className="flex items-center gap-1.5 truncate">
+                            <span className="text-sm">{nextT.flag}</span>
+                            <span
+                              className={`text-[9px] font-black px-1.5 py-0.2 rounded uppercase ${
+                                nextT.tour === 'ATP'
+                                  ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                                  : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                              }`}
+                            >
+                              {nextT.tour}
+                            </span>
+                            <span className="text-xs font-bold text-white group-hover:text-emerald-300 transition-colors truncate">
+                              {nextT.city}
+                            </span>
+                            <span className="text-[10px] text-slate-400 hidden sm:inline">
+                              • {nextT.category}
+                            </span>
+                          </div>
+                          <span className="px-2 py-0.5 rounded bg-emerald-600/20 group-hover:bg-emerald-600 text-emerald-300 group-hover:text-white text-[11px] font-bold border border-emerald-500/30 transition-all shrink-0">
+                            Играть →
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ) : (
-                  currentActiveTrn && onSelectTournament && (
-                    <button
-                      onClick={() => onSelectTournament(currentActiveTrnIndex)}
-                      className="ml-auto px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                    >
-                      К текущему турниру недели ({currentActiveTrn.tour} {currentActiveTrn.city}) →
-                    </button>
-                  )
+                  <div className="pt-2.5 border-t border-amber-500/20 space-y-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-xs text-emerald-400 font-bold flex items-center gap-1.5">
+                        <span>✓</span>
+                        <span>Все турниры недели #{tournament.week} завершены!</span>
+                      </span>
+                      {nextWeekTournaments.length > 0 ? (
+                        <button
+                          id="next-tournament-btn"
+                          onClick={() => onNextTournament(nextWeekTournaments[0].originalIndex)}
+                          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 transition-all cursor-pointer flex items-center gap-1.5"
+                        >
+                          <span>К неделе #{nextWeekTournaments[0].week} ({nextWeekTournaments[0].tour} {nextWeekTournaments[0].city}) →</span>
+                        </button>
+                      ) : (
+                        <button
+                          id="next-tournament-btn"
+                          onClick={() => onNextTournament()}
+                          className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 rounded-xl text-xs font-black shadow-md shadow-orange-500/20 transition-all cursor-pointer flex items-center gap-1.5"
+                        >
+                          <span>🏆 Завершить сезон {season?.year} →</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {nextWeekTournaments.length > 1 && (
+                      <div className="space-y-1.5 mt-2">
+                        <span className="text-[11px] text-slate-400 font-medium">Выберите турнир для начала недели #{nextWeekTournaments[0].week}:</span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {nextWeekTournaments.map(nextT => (
+                            <button
+                              key={nextT.id}
+                              onClick={() => {
+                                if (onSetCurrentTournament) onSetCurrentTournament(nextT.originalIndex);
+                                else onNextTournament(nextT.originalIndex);
+                              }}
+                              className="p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-emerald-500/70 transition-all cursor-pointer text-left flex items-center justify-between gap-2 group"
+                            >
+                              <div className="flex items-center gap-1.5 truncate">
+                                <span className="text-sm">{nextT.flag}</span>
+                                <span
+                                  className={`text-[9px] font-black px-1.5 py-0.2 rounded uppercase ${
+                                    nextT.tour === 'ATP'
+                                      ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                                      : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                  }`}
+                                >
+                                  {nextT.tour}
+                                </span>
+                                <span className="text-xs font-bold text-white group-hover:text-emerald-300 transition-colors truncate">
+                                  {nextT.city}
+                                </span>
+                                <span className="text-[10px] text-slate-400 hidden sm:inline">
+                                  • {nextT.category}
+                                </span>
+                              </div>
+                              <span className="px-2 py-0.5 rounded bg-emerald-600/20 group-hover:bg-emerald-600 text-emerald-300 group-hover:text-white text-[11px] font-bold border border-emerald-500/30 transition-all shrink-0">
+                                Начать →
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
-            ) : isUpcoming ? (
+            ) : isLockedByAnother ? (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 px-3.5 py-2 rounded-xl font-medium flex items-center gap-1.5">
+                  <span>🔒</span>
+                  <span>
+                    Турнир заблокирован: сейчас проводится <strong>{tournamentInProgressInWeek?.tour} {tournamentInProgressInWeek?.nameRu}</strong>
+                  </span>
+                </span>
+                {onSelectTournament && tournamentInProgressInWeek && (
+                  <button
+                    onClick={() => onSelectTournament(tournamentInProgressInWeek.originalIndex)}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 transition-all cursor-pointer flex items-center gap-1"
+                  >
+                    К активному ({tournamentInProgressInWeek.tour} {tournamentInProgressInWeek.city}) →
+                  </button>
+                )}
+              </div>
+            ) : !isCurrentActive && isPlayableNow ? (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-sky-300 bg-sky-500/10 border border-sky-500/30 px-3 py-1.5 rounded-xl font-medium flex items-center gap-1.5">
+                  <span>🎾</span>
+                  <span>Неделя #{tournament.week}: турнир готов к игре!</span>
+                </span>
+                {onSetCurrentTournament && (
+                  <button
+                    onClick={() => onSetCurrentTournament(currentTrnOriginalIndex)}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span>▶ Выбрать и играть</span>
+                  </button>
+                )}
+                {currentActiveTrn && onSelectTournament && (
+                  <button
+                    onClick={() => onSelectTournament(currentActiveTrnIndex)}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer"
+                  >
+                    К активному ({currentActiveTrn.tour} {currentActiveTrn.city}) →
+                  </button>
+                )}
+              </div>
+            ) : isUpcomingFutureWeek ? (
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 px-3.5 py-2 rounded-xl font-medium">
-                  ⏳ Начнётся по очереди после текущего турнира недели
+                  ⏳ Неделя #{tournament.week} (сейчас идёт неделя #{activeSeasonWeek})
                 </span>
                 {currentActiveTrn && onSelectTournament && (
                   <button
                     onClick={() => onSelectTournament(currentActiveTrnIndex)}
                     className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
                   >
-                    Играть текущий: {currentActiveTrn.tour} {currentActiveTrn.city} →
+                    К турниру недели #{activeSeasonWeek} ({currentActiveTrn.tour} {currentActiveTrn.city}) →
                   </button>
                 )}
               </div>
@@ -754,6 +984,14 @@ export function TournamentBracket({
                         <FileText className="w-3.5 h-3.5 text-sky-400" />
                         Посмотреть протокол сетов (S1, S2...)
                       </button>
+                    ) : isLockedByAnother ? (
+                      <div className="w-full py-2 px-3 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 text-xs font-medium flex items-center justify-center gap-1.5 text-center">
+                        <span>🔒 Заблокировано: завершите {tournamentInProgressInWeek?.tour} {tournamentInProgressInWeek?.city}</span>
+                      </div>
+                    ) : isUpcomingFutureWeek ? (
+                      <div className="w-full py-2 px-3 rounded-xl bg-slate-900 border border-slate-800 text-slate-500 text-xs font-medium flex items-center justify-center gap-1.5 text-center">
+                        <span>⏳ Неделя #{tournament.week} (ожидает текущую неделю)</span>
+                      </div>
                     ) : (
                       <>
                         <button
