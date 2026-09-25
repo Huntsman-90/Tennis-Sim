@@ -11,12 +11,10 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        injectRegister: 'auto',
         includeAssets: [
           'favicon.ico',
           'apple-touch-icon.png',
           'icon.svg',
-          'app-logo.png',
           'pwa-192x192.png',
           'pwa-512x512.png',
           'pwa-maskable-512x512.png',
@@ -26,7 +24,7 @@ export default defineConfig(() => {
           name: 'ATP & WTA Tour',
           short_name: 'ATP & WTA',
           description:
-            'Полноценный симулятор теннисного сезона ATP и WTA с реальными правилами, турнирной сеткой, квалификацией, зрительским режимом и оффлайн поддержкой.',
+            'Полноценный симулятор теннисного сезона ATP и WTA с реальными правилами, турнирной сеткой, зрительским режимом и оффлайн поддержкой.',
           theme_color: '#090d16',
           background_color: '#090d16',
           display: 'standalone',
@@ -55,10 +53,7 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,json,webp,jpg}'],
-          maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-          cleanupOutdatedCaches: true,
-          navigateFallback: 'index.html',
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,json}'],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
