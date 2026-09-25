@@ -21,7 +21,7 @@ export default defineConfig(() => {
         ],
         manifest: {
           id: '/',
-          name: 'ATP & WTA Tour',
+          name: 'Большой Теннис: ATP & WTA Тур',
           short_name: 'ATP & WTA',
           description:
             'Полноценный симулятор теннисного сезона ATP и WTA с реальными правилами, турнирной сеткой, зрительским режимом и оффлайн поддержкой.',
@@ -53,7 +53,8 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,json}'],
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,json,webmanifest}'],
+          navigateFallback: 'index.html',
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
