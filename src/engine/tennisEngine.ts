@@ -22,44 +22,44 @@ export function rollDailyForm(player: Player, forcedRoll?: number): DailyForm {
       return {
         roll: 1,
         label: 'Спад / Не в духе ❄️',
-        modifier: -1,
-        description: 'Серия невынужденных ошибок, скованность и нехватка резкости (-1 к розыгрышам, -1 к подаче)',
+        modifier: -0.5,
+        description: 'Небольшая скованность в затяжных розыгрышах (-0.5 к розыгрышам)',
       };
     case 2:
       return {
         roll: 2,
         label: 'Тяжёлый старт 📉',
-        modifier: -0.5,
-        description: 'Мяч срывается с задней линии, недостаток уверенности (-0.5 к розыгрышам)',
+        modifier: -0.25,
+        description: 'Лёгкая нехватка резкости (-0.25 к розыгрышам)',
       };
     case 3:
       return {
         roll: 3,
         label: 'Обычная форма ⚖️',
         modifier: 0,
-        description: 'Стабильный теннис в соответствии с классом и текущим рейтингом (0 к розыгрышам)',
+        description: 'Стабильный теннис в соответствии с классом (0)',
       };
     case 4:
       return {
         roll: 4,
         label: 'Рабочий тонус 👍',
         modifier: 0,
-        description: 'Хорошая реакция на приёме и концентрация на брейк-поинтах (0 к розыгрышам)',
+        description: 'Хорошая концентрация в ключевых очках (0)',
       };
     case 5:
       return {
         roll: 5,
         label: 'На подъёме 📈',
-        modifier: 0.5,
-        description: 'Острые глубокие удары, надежность в обмене ударами (+0.5 к розыгрышам)',
+        modifier: 0.25,
+        description: 'Острые глубокие удары, точность (+0.25 к розыгрышам)',
       };
     case 6:
     default:
       return {
         roll: 6,
         label: 'На кураже! 🔥',
-        modifier: 1,
-        description: 'Вдохновение и кураж, уверенность в решающих очках (+1 к розыгрышам, +1 к подаче)',
+        modifier: 0.5,
+        description: 'Вдохновение и лёгкость в розыгрышах (+0.5 к розыгрышам)',
       };
   }
 }
@@ -123,12 +123,9 @@ export function getSurfaceBonus(player: Player, surface: Surface): number {
 }
 
 export function getRankingBonus(rank: number): number {
-  if (rank <= 10) return 3;
-  if (rank <= 30) return 2;
-  if (rank <= 60) return 1;
-  if (rank <= 100) return 0;
-  if (rank <= 150) return -1;
-  return -2;
+  if (rank <= 10) return 1;
+  if (rank <= 30) return 0.5;
+  return 0; // No rank penalties for lower ranked players
 }
 
 // Convert tennis game score state
@@ -179,13 +176,11 @@ export function simulateOnePoint(
   let serveModifier = serverPlayer.serveBonus;
   if (surface.includes('Трава')) serveModifier += 1;
 
-  // Daily form impact on serve (-1 to +1)
+  // Daily form subtle effect on serve (mild +0.5 boost only on peak inspiration 6, no harsh penalties)
   if (server === 1) {
-    if (match.p1DailyForm.roll === 6) serveModifier += 1;
-    else if (match.p1DailyForm.roll === 1) serveModifier -= 1;
+    if (match.p1DailyForm.roll === 6) serveModifier += 0.5;
   } else {
-    if (match.p2DailyForm.roll === 6) serveModifier += 1;
-    else if (match.p2DailyForm.roll === 1) serveModifier -= 1;
+    if (match.p2DailyForm.roll === 6) serveModifier += 0.5;
   }
 
   const rawD20 = rollDice(20);
@@ -242,8 +237,8 @@ export function simulateOnePoint(
 
     const p1Surface = getSurfaceBonus(p1, surface);
     const p2Surface = getSurfaceBonus(p2, surface);
-    const p1RankBonus = p1.id === 'ksenia-morey' ? 2 : getRankingBonus(p1.rank);
-    const p2RankBonus = p2.id === 'ksenia-morey' ? 2 : getRankingBonus(p2.rank);
+    const p1RankBonus = getRankingBonus(p1.rank);
+    const p2RankBonus = getRankingBonus(p2.rank);
 
     const p1FormBonus = match.p1DailyForm.modifier;
     const p2FormBonus = match.p2DailyForm.modifier;
