@@ -369,7 +369,6 @@ export function serializeSeason(season: Season): any {
       currentRound: t.currentRound,
       matches: (t.matches || []).map(serializeMatch),
       qm: (t.qualifyingMatches || []).map(serializeMatch),
-      qc: t.qualifyingCompleted,
       llp: (t.luckyLosersPool || []).map(p => p.id),
       wd: t.withdrawals,
     })),
@@ -457,7 +456,7 @@ export function deserializeSeason(data: any, players: Player[]): Season {
           return sanitizePlayer(p);
         }),
         withdrawals: t.wd || [],
-        qualifyingCompleted: t.qc !== undefined ? !!t.qc : (t.drawSize === 8 || (t.qm && t.qm.length > 0 && t.qm.some((m: any) => (m.r === 'Q-QF' || m.r === 'Q') && m.c === 1))),
+        qualifyingCompleted: t.qm && t.qm.length > 0,
       };
     }),
   };

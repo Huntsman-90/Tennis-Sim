@@ -204,7 +204,7 @@ function allocateTourPlayersForWeek(
       let anyAdded = false;
       for (const tpl of roundRobinTpls) {
         const currentList = draws.get(tpl)!;
-        const needed = tpl.drawSize === 8 ? 8 : 60;
+        const needed = tpl.drawSize === 8 ? 8 : 36;
         if (currentList.length < needed) {
           while (playerIdx < sortedPlayers.length && isPlayerUsedInWeek(sortedPlayers[playerIdx])) {
             playerIdx++;
@@ -229,7 +229,7 @@ function allocateTourPlayersForWeek(
       let anyAdded = false;
       for (const tpl of sortedTpls) {
         const currentList = draws.get(tpl)!;
-        const needed = tpl.drawSize === 8 ? 8 : 60;
+        const needed = tpl.drawSize === 8 ? 8 : 36;
         if (currentList.length < needed) {
           while (playerIdx < sortedPlayers.length && isPlayerUsedInWeek(sortedPlayers[playerIdx])) {
             playerIdx++;
@@ -249,7 +249,7 @@ function allocateTourPlayersForWeek(
   // Ensure each draw has requiredSize and fill any shortfall with tournament-specific unique qualifiers
   for (const tpl of tourTemplates) {
     const list = draws.get(tpl)!;
-    const needed = tpl.drawSize === 8 ? 8 : 60;
+    const needed = tpl.drawSize === 8 ? 8 : 36;
     fillWithUniqueQualifiers(list, tpl, year, needed, usedPlayerNamesInWeek);
     result.set(tpl, list);
   }
@@ -266,14 +266,14 @@ export function createTournamentDraw(
   const sortedDraw = [...drawPlayers].sort((a, b) => a.rank - b.rank);
 
   const tournamentId = `trn_${template.tour.toLowerCase()}_${template.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}_${year}`;
-  const initialRound = template.drawSize === 8 ? 'QF' : 'Q-R32';
+  const initialRound = template.drawSize === 8 ? 'QF' : 'R32';
   const matches: Match[] = [];
   let qualifyingMatches: Match[] = [];
   let luckyLosersPool: Player[] = [];
   const withdrawals: TournamentWithdrawal[] = [];
 
   // Real Tennis Seeded bracket pairings:
-  if (template.drawSize === 8) {
+  if (initialRound === 'QF') {
     // 8-player draw (e.g. ATP Finals / WTA Finals):
     // Real Tennis Seeding:
     // Match 0: [1] vs [8] (Winner feeds SF 1)
@@ -303,13 +303,13 @@ export function createTournamentDraw(
       }
     }
   } else {
-    // 32-player main draw with 32-player Qualification starting at 1/16 (Q-R32):
-    // Top 16 players: seeds [1] to [16] in main draw
-    // Next 12 players: Direct Acceptances (DA) in main draw
-    // Next 32 players (indices 28-59): 32 Qualifying participants playing 16 matches in Q-R32 (1/16 финала)!
+    // 32-player draw with Qualification Pre-generation:
+    // Top 16 players: seeds [1] to [16]
+    // Next 12 players: Direct Acceptances (DA)
+    // Next 8 players (indices 28-35): 8 Qualifying participants playing 4 Q-Finals!
     const seeds = sortedDraw.slice(0, 16);
     const directAcceptances = sortedDraw.slice(16, 28);
-    const rawQualCandidates = sortedDraw.slice(28);
+    const initialCandidates = sortedDraw.slice(28, 36);
 
     const usedQualNames = new Set<string>();
     sortedDraw.slice(0, 28).forEach(p => {
@@ -318,23 +318,22 @@ export function createTournamentDraw(
       if (p.nameEn) usedQualNames.add(p.nameEn.toLowerCase());
     });
 
-    // Ensure 32 strictly unique qualifying candidates:
+    // Ensure 8 strictly unique qualifying candidates:
     const qualifyingCandidates: Player[] = [];
     const seenCandidateNames = new Set<string>();
 
-    for (const cand of rawQualCandidates) {
+    for (const cand of initialCandidates) {
       const lower = cand.name.toLowerCase();
       if (!usedQualNames.has(lower) && !seenCandidateNames.has(lower)) {
         seenCandidateNames.add(lower);
         usedQualNames.add(lower);
         usedQualNames.add(cand.id.toLowerCase());
         qualifyingCandidates.push(cand);
-        if (qualifyingCandidates.length >= 32) break;
       }
     }
 
     let qIdx = qualifyingCandidates.length + 1;
-    while (qualifyingCandidates.length < 32) {
+    while (qualifyingCandidates.length < 8) {
       const realPlayer = getRealTourQualifier(
         template.tour,
         `${tournamentId}_qcand_${qIdx}`,
@@ -354,112 +353,76 @@ export function createTournamentDraw(
       qIdx++;
     }
 
-    // Sort 32 qualification players by rank:
-    qualifyingCandidates.sort((a, b) => a.rank - b.rank);
-    const qSeeds = qualifyingCandidates.slice(0, 16);
-    const qUnseeded = qualifyingCandidates.slice(16, 32);
-
-    // 16 Matches of Round 1: Q-R32 (1/16 финала квалификации)
-    // Structured in 4 sections (each producing 1 qualifier):
-    const q32Layout = [
-      // Section 1 -> feeds Qualifier 1
-      { qSeedIdx: 0, qSeedNum: 1, unseededIdx: 0 },
-      { qSeedIdx: 7, qSeedNum: 8, unseededIdx: 1 },
-      { qSeedIdx: 4, qSeedNum: 5, unseededIdx: 2 },
-      { qSeedIdx: 3, qSeedNum: 4, unseededIdx: 3 },
-      // Section 2 -> feeds Qualifier 2
-      { qSeedIdx: 1, qSeedNum: 2, unseededIdx: 4 },
-      { qSeedIdx: 6, qSeedNum: 7, unseededIdx: 5 },
-      { qSeedIdx: 5, qSeedNum: 6, unseededIdx: 6 },
-      { qSeedIdx: 2, qSeedNum: 3, unseededIdx: 7 },
-      // Section 3 -> feeds Qualifier 3
-      { qSeedIdx: 8, qSeedNum: 9, unseededIdx: 8 },
-      { qSeedIdx: 15, qSeedNum: 16, unseededIdx: 9 },
-      { qSeedIdx: 12, qSeedNum: 13, unseededIdx: 10 },
-      { qSeedIdx: 11, qSeedNum: 12, unseededIdx: 11 },
-      // Section 4 -> feeds Qualifier 4
-      { qSeedIdx: 9, qSeedNum: 10, unseededIdx: 12 },
-      { qSeedIdx: 14, qSeedNum: 15, unseededIdx: 13 },
-      { qSeedIdx: 13, qSeedNum: 14, unseededIdx: 14 },
-      { qSeedIdx: 10, qSeedNum: 11, unseededIdx: 15 },
+    // Pre-generate the 4 Qualification matches (Q-Finals)
+    const qPairings = [
+      { p1Idx: 0, p2Idx: 7, qSeed1: 1, qSeed2: 8 },
+      { p1Idx: 3, p2Idx: 4, qSeed1: 4, qSeed2: 5 },
+      { p1Idx: 2, p2Idx: 5, qSeed1: 3, qSeed2: 6 },
+      { p1Idx: 1, p2Idx: 6, qSeed1: 2, qSeed2: 7 },
     ];
 
-    for (let i = 0; i < q32Layout.length; i++) {
-      const item = q32Layout[i];
-      let p1 = qSeeds[item.qSeedIdx];
-      let p2 = qUnseeded[item.unseededIdx];
+    const qualifiers: Player[] = [];
+    const llCandidates: Player[] = [];
 
+    for (let q = 0; q < qPairings.length; q++) {
+      const pair = qPairings[q];
+      let p1 = qualifyingCandidates[pair.p1Idx];
+      let p2 = qualifyingCandidates[pair.p2Idx];
+
+      // Absolute safety invariant: p1 and p2 can NEVER be the same person!
       if (p1.id === p2.id || p1.name.toLowerCase() === p2.name.toLowerCase()) {
         const fresh = getRealTourQualifier(
           template.tour,
-          `${tournamentId}_pair_repair_${i}`,
-          i + 50,
+          `${tournamentId}_pair_repair_${q}`,
+          q + 45,
           usedQualNames
         );
         p2 = {
           ...fresh,
-          id: `real_cand_fix_${template.tour.toLowerCase()}_${tournamentId}_${fresh.id}_${i}`,
+          id: `real_cand_fix_${template.tour.toLowerCase()}_${tournamentId}_${fresh.id}_${q}`,
           favSurface: template.surface,
         };
-        qUnseeded[item.unseededIdx] = p2;
+        qualifyingCandidates[pair.p2Idx] = p2;
       }
 
-      // Initial qualification matches are created unplayed! No auto-simulation.
-      qualifyingMatches.push(
-        createNewMatch(
-          `${tournamentId}_qual`,
-          'Q-R32',
-          p1,
-          p2,
-          item.qSeedNum,
-          undefined,
-          'SEED',
-          'Q'
-        )
+      const qMatch = createNewMatch(
+        `${tournamentId}_qual`,
+        `Q-Final ${q + 1}`,
+        p1,
+        p2,
+        pair.qSeed1,
+        pair.qSeed2,
+        'Q',
+        'Q'
       );
+      // Pre-simulate qualification instantly!
+      const simMatch = simulateFullMatchInstantly(qMatch, template.surface);
+      qualifyingMatches.push(simMatch);
+
+      const qWinner = simMatch.winnerId === p1.id ? p1 : p2;
+      const qLoser = simMatch.winnerId === p1.id ? p2 : p1;
+      qualifiers.push(qWinner);
+      llCandidates.push(qLoser);
     }
 
-    // Helper for placeholder qualifier in main draw
-    const createQualifierPlaceholder = (qNum: number): Player => ({
-      id: `qual_tbd_${tournamentId}_q${qNum}`,
-      name: `Победитель Квал. #${qNum}`,
-      nameEn: `Qualifier #${qNum}`,
-      tour: template.tour,
-      country: 'Квалификация',
-      flag: '🎾',
-      age: 22,
-      rank: 100 + qNum * 5,
-      prevRank: 100 + qNum * 5,
-      points: 120,
-      style: 'Универсал',
-      favSurface: template.surface,
-      rallyBonus: 0,
-      serveBonus: 0,
-      stats: { serve: 3, rally: 3, forehand: 3, backhand: 3, stamina: 3, mental: 3 },
-      avatarColor: '#10b981',
-      careerTitles: 0,
-      wins: 0,
-      losses: 0,
-      h2h: {},
-      fatigue: 0,
-      injury: null,
-      peakRank: 100,
-      bio: 'Победитель квалификационного отбора, заслуживший место в основной сетке турнира.',
-    });
+    // Lucky Losers pool is sorted by rank (best rank is LL #1)
+    luckyLosersPool = [...llCandidates].sort((a, b) => a.rank - b.rank);
 
-    // Assemble the 16 unseeded spots for R32 (12 DA + 4 Qualifiers at positions 3, 7, 11, 15):
+    // Assemble the 16 unseeded spots for R32:
+    // 12 Direct Acceptances and 4 Qualifiers [Q]
+    // Standard Grand Slam / ATP draw distributes Qualifiers at slots [3, 7, 11, 15]
     const unseededDraw: { player: Player; entryType: TournamentEntryType }[] = [];
     let daIdx = 0;
-    let qualNum = 1;
+    let qualIdx = 0;
     for (let i = 0; i < 16; i++) {
       if (i === 3 || i === 7 || i === 11 || i === 15) {
         unseededDraw.push({
-          player: createQualifierPlaceholder(qualNum++),
+          player: qualifiers[qualIdx++] || directAcceptances[daIdx++],
           entryType: 'Q',
         });
       } else {
         unseededDraw.push({
-          player: directAcceptances[daIdx++] || createQualifierPlaceholder(qualNum++),
+          player: directAcceptances[daIdx++] || qualifiers[qualIdx++],
           entryType: 'DA',
         });
       }
@@ -500,6 +463,65 @@ export function createTournamentDraw(
 
       matches.push(createNewMatch(tournamentId, 'R32', p1, p2, p1Seed, p2Seed, p1EntryType, p2EntryType));
     }
+
+    // Check for Pre-tournament Withdrawals:
+    // If an entered player is injured, has extreme fatigue (>=80%), or gets a pre-tournament withdrawal roll (~4%),
+    // they withdraw prior to the start of the tournament and are replaced by a Lucky Loser [LL] from the qualification!
+    for (const m of matches) {
+      for (const slot of ['p1', 'p2'] as const) {
+        const player = slot === 'p1' ? m.player1 : m.player2;
+        const currentEntry = slot === 'p1' ? m.p1EntryType : m.p2EntryType;
+        if (currentEntry === 'Q' || currentEntry === 'LL') continue;
+
+        const hasInjury = !!player.injury;
+        const hasCriticalFatigue = (player.fatigue || 0) >= 80;
+        const withdrawalRoll = Math.random() < 0.035;
+
+        if ((hasInjury || hasCriticalFatigue || withdrawalRoll) && luckyLosersPool.length > 0) {
+          const luckyLoser = luckyLosersPool.shift()!;
+          const reasons = [
+            'Растяжение мышц бедра на тренировке',
+            'Воспаление сухожилия правого плеча',
+            'Острая вирусная инфекция и температура',
+            'Мышечное истощение после затяжного финала',
+            'Спазм мышц поясницы',
+          ];
+          const reason = player.injury
+            ? `${player.injury.type} (${player.injury.severity === 'severe' ? 'Тяжелая травма' : player.injury.severity === 'moderate' ? 'Травма средней тяжести' : 'Легкое повреждение'})`
+            : hasCriticalFatigue
+            ? 'Переутомление после серии тяжелых турниров'
+            : reasons[Math.floor(Math.random() * reasons.length)];
+
+          withdrawals.push({
+            originalPlayerId: player.id,
+            originalPlayerName: player.name,
+            originalPlayerFlag: player.flag,
+            reason,
+            replacementPlayerId: luckyLoser.id,
+            replacementPlayerName: luckyLoser.name,
+            replacementPlayerFlag: luckyLoser.flag,
+            type: 'LL',
+            roundName: 'R32',
+            withdrawnAt: Date.now(),
+          });
+
+          // Rest recovering player
+          if (!player.injury) {
+            player.fatigue = Math.max(0, (player.fatigue || 0) - 25);
+          }
+
+          if (slot === 'p1') {
+            m.player1 = luckyLoser;
+            m.p1Seed = undefined;
+            m.p1EntryType = 'LL';
+          } else {
+            m.player2 = luckyLoser;
+            m.p2Seed = undefined;
+            m.p2EntryType = 'LL';
+          }
+        }
+      }
+    }
   }
 
   return {
@@ -521,7 +543,7 @@ export function createTournamentDraw(
     matches,
     currentRound: initialRound,
     qualifyingMatches,
-    qualifyingCompleted: template.drawSize === 8,
+    qualifyingCompleted: qualifyingMatches.length > 0,
     luckyLosersPool,
     withdrawals,
   };
@@ -586,11 +608,6 @@ export function countSeasonCompletedMatches(season: Season): number {
         if (m && m.isCompleted) count++;
       }
     }
-    if (Array.isArray(t.qualifyingMatches)) {
-      for (const m of t.qualifyingMatches) {
-        if (m && m.isCompleted) count++;
-      }
-    }
   }
   return count;
 }
@@ -624,11 +641,10 @@ export function deduplicateWeeklySeasonDraws(season: Season): boolean {
       let repairCounter = 1;
       const isPlaceholder = (p?: Player | null): boolean => {
         if (!p || !p.name) return true;
-        if (p.id.startsWith('qual_tbd')) return false;
         const name = p.name.trim();
         return (
           name.length < 3 ||
-          /(Игрок Тура|Игрок|Tour Player|Unknown|Кандидат|Candidate|player_unknown)/i.test(name) ||
+          /(Игрок Тура|Игрок|Tour Player|Unknown|Кандидат|Квалификант|Candidate|Qualifier|player_unknown)/i.test(name) ||
           p.country === 'Тур' ||
           p.flag === '🎾' ||
           p.id === 'player_unknown'
@@ -656,7 +672,7 @@ export function deduplicateWeeklySeasonDraws(season: Season): boolean {
             const m = t.matches[i];
             if (!m.player1 || !m.player2) continue;
 
-            // Fix any placeholder player in player1 or player2 (skip pending qualifier placeholders)
+            // Fix any placeholder player in player1 or player2
             if (isPlaceholder(m.player1)) {
               const oldId = m.player1.id;
               const freshP1 = getUniqueRepairPlayer(`main_placeholder_p1_${t.id}_${i}`, t.surface);
@@ -688,17 +704,17 @@ export function deduplicateWeeklySeasonDraws(season: Season): boolean {
 
             // Self match check in unplayed main draw match
             if (
-              !m.player1.id.startsWith('qual_tbd') &&
-              !m.player2.id.startsWith('qual_tbd') &&
-              (m.player1.id === m.player2.id || m.player1.name.toLowerCase() === m.player2.name.toLowerCase())
+              m.player1.id === m.player2.id ||
+              m.player1.name.toLowerCase() === m.player2.name.toLowerCase()
             ) {
               const freshP2 = getUniqueRepairPlayer(`main_self_${t.id}_${i}`, t.surface);
               m.player2 = freshP2;
               changesMade = true;
             }
 
-            if (m.player1 && !m.player1.id.startsWith('qual_tbd')) {
+            if (m.player1) {
               const p1Name = m.player1.name.toLowerCase();
+              // Qualifiers legitimately belong in the tournament's qualifying and main draw
               if (m.p1EntryType !== 'Q' && weekSeenNames.has(p1Name)) {
                 const freshP1 = getUniqueRepairPlayer(`main_dup_p1_${t.id}_${i}`, t.surface);
                 m.player1 = freshP1;
@@ -709,7 +725,7 @@ export function deduplicateWeeklySeasonDraws(season: Season): boolean {
               }
             }
 
-            if (m.player2 && !m.player2.id.startsWith('qual_tbd')) {
+            if (m.player2) {
               const p2Name = m.player2.name.toLowerCase();
               if (m.p2EntryType !== 'Q' && weekSeenNames.has(p2Name)) {
                 const freshP2 = getUniqueRepairPlayer(`main_dup_p2_${t.id}_${i}`, t.surface);
@@ -847,185 +863,7 @@ export function createInitialSeason(year = 2026, existingPlayers?: Player[]): Se
 
 // Advances the bracket to the next round if all matches in current round are complete
 export function advanceTournamentRound(tournament: Tournament): boolean {
-  // Handle Qualification Progression if qualification exists and not yet completed:
-  if (tournament.qualifyingMatches && tournament.qualifyingMatches.length > 0 && !tournament.qualifyingCompleted) {
-    if (tournament.currentRound === 'Q-R32') {
-      const qR32 = tournament.qualifyingMatches.filter(m => m.roundName === 'Q-R32');
-      const allDone = qR32.length === 16 && qR32.every(m => m.isCompleted && m.winnerId);
-      if (!allDone) return false;
-
-      // Create 8 matches for Q-R16:
-      const winnerEntries = qR32.map(m => {
-        const isP1 = m.winnerId === m.player1.id;
-        return {
-          player: isP1 ? m.player1 : m.player2,
-          seed: isP1 ? m.p1Seed : m.p2Seed,
-          entryType: isP1 ? m.p1EntryType : m.p2EntryType,
-        };
-      });
-
-      for (let i = 0; i < winnerEntries.length; i += 2) {
-        if (winnerEntries[i] && winnerEntries[i + 1]) {
-          const match = createNewMatch(
-            `${tournament.id}_qual`,
-            'Q-R16',
-            winnerEntries[i].player,
-            winnerEntries[i + 1].player,
-            winnerEntries[i].seed,
-            winnerEntries[i + 1].seed,
-            winnerEntries[i].entryType || 'Q',
-            winnerEntries[i + 1].entryType || 'Q'
-          );
-          tournament.qualifyingMatches.push(match);
-        }
-      }
-
-      tournament.currentRound = 'Q-R16';
-      return true;
-    }
-
-    if (tournament.currentRound === 'Q-R16') {
-      const qR16 = tournament.qualifyingMatches.filter(m => m.roundName === 'Q-R16');
-      const allDone = qR16.length === 8 && qR16.every(m => m.isCompleted && m.winnerId);
-      if (!allDone) return false;
-
-      // Create 4 matches for Q-QF (Q-Finals):
-      const winnerEntries = qR16.map(m => {
-        const isP1 = m.winnerId === m.player1.id;
-        return {
-          player: isP1 ? m.player1 : m.player2,
-          seed: isP1 ? m.p1Seed : m.p2Seed,
-          entryType: isP1 ? m.p1EntryType : m.p2EntryType,
-        };
-      });
-
-      for (let i = 0; i < winnerEntries.length; i += 2) {
-        if (winnerEntries[i] && winnerEntries[i + 1]) {
-          const match = createNewMatch(
-            `${tournament.id}_qual`,
-            'Q-QF',
-            winnerEntries[i].player,
-            winnerEntries[i + 1].player,
-            winnerEntries[i].seed,
-            winnerEntries[i + 1].seed,
-            winnerEntries[i].entryType || 'Q',
-            winnerEntries[i + 1].entryType || 'Q'
-          );
-          tournament.qualifyingMatches.push(match);
-        }
-      }
-
-      tournament.currentRound = 'Q-QF';
-      return true;
-    }
-
-    if (tournament.currentRound === 'Q-QF' || tournament.currentRound === 'Q') {
-      const qQF = tournament.qualifyingMatches.filter(m => m.roundName === 'Q-QF' || m.roundName === 'Q');
-      const targetCount = qQF.length > 0 ? qQF.length : 4;
-      const allDone = qQF.length === targetCount && qQF.every(m => m.isCompleted && m.winnerId);
-      if (!allDone) return false;
-
-      // 4 Winners qualify for Main Draw!
-      const qualifiers: Player[] = [];
-      const llCandidates: Player[] = [];
-
-      for (const m of qQF) {
-        const isP1 = m.winnerId === m.player1.id;
-        const winner = isP1 ? m.player1 : m.player2;
-        const loser = isP1 ? m.player2 : m.player1;
-        qualifiers.push(winner);
-        llCandidates.push(loser);
-      }
-
-      // Lucky Losers pool sorted by ranking (highest ranked player is LL #1)
-      const luckyLosersPool = [...llCandidates].sort((a, b) => a.rank - b.rank);
-      tournament.luckyLosersPool = luckyLosersPool;
-
-      // Place the 4 qualifiers into R32 main draw matches:
-      let qualIdx = 0;
-      for (const m of tournament.matches) {
-        if (m.roundName === 'R32') {
-          if (m.p1EntryType === 'Q' || m.player1.id.startsWith('qual_tbd')) {
-            if (qualifiers[qualIdx]) {
-              m.player1 = qualifiers[qualIdx++];
-              m.p1EntryType = 'Q';
-            }
-          }
-          if (m.p2EntryType === 'Q' || m.player2.id.startsWith('qual_tbd')) {
-            if (qualifiers[qualIdx]) {
-              m.player2 = qualifiers[qualIdx++];
-              m.p2EntryType = 'Q';
-            }
-          }
-        }
-      }
-
-      // Pre-tournament withdrawals & Lucky Loser replacements:
-      const withdrawals: TournamentWithdrawal[] = tournament.withdrawals || [];
-      for (const m of tournament.matches) {
-        if (m.roundName !== 'R32') continue;
-        for (const slot of ['p1', 'p2'] as const) {
-          const player = slot === 'p1' ? m.player1 : m.player2;
-          const currentEntry = slot === 'p1' ? m.p1EntryType : m.p2EntryType;
-          if (currentEntry === 'Q' || currentEntry === 'LL') continue;
-
-          const hasInjury = !!player.injury;
-          const hasCriticalFatigue = (player.fatigue || 0) >= 80;
-          const withdrawalRoll = Math.random() < 0.035;
-
-          if ((hasInjury || hasCriticalFatigue || withdrawalRoll) && luckyLosersPool.length > 0) {
-            const luckyLoser = luckyLosersPool.shift()!;
-            const reasons = [
-              'Растяжение мышц бедра на тренировке',
-              'Воспаление сухожилия правого плеча',
-              'Острая вирусная инфекция и температура',
-              'Мышечное истощение после затяжного финала',
-              'Спазм мышц поясницы',
-            ];
-            const reason = player.injury
-              ? `${player.injury.type} (${player.injury.severity === 'severe' ? 'Тяжелая травма' : player.injury.severity === 'moderate' ? 'Травма средней тяжести' : 'Легкое повреждение'})`
-              : hasCriticalFatigue
-              ? 'Переутомление после серии тяжелых турниров'
-              : reasons[Math.floor(Math.random() * reasons.length)];
-
-            withdrawals.push({
-              originalPlayerId: player.id,
-              originalPlayerName: player.name,
-              originalPlayerFlag: player.flag,
-              reason,
-              replacementPlayerId: luckyLoser.id,
-              replacementPlayerName: luckyLoser.name,
-              replacementPlayerFlag: luckyLoser.flag,
-              type: 'LL',
-              roundName: 'R32',
-              withdrawnAt: Date.now(),
-            });
-
-            if (!player.injury) {
-              player.fatigue = Math.max(0, (player.fatigue || 0) - 25);
-            }
-
-            if (slot === 'p1') {
-              m.player1 = luckyLoser;
-              m.p1Seed = undefined;
-              m.p1EntryType = 'LL';
-            } else {
-              m.player2 = luckyLoser;
-              m.p2Seed = undefined;
-              m.p2EntryType = 'LL';
-            }
-          }
-        }
-      }
-      tournament.withdrawals = withdrawals;
-      tournament.qualifyingCompleted = true;
-      tournament.currentRound = 'R32';
-      return true;
-    }
-  }
-
-  // Main Draw progression:
-  const roundOrder = tournament.drawSize === 8 ? ['QF', 'SF', 'F'] : ['R32', 'R16', 'QF', 'SF', 'F'];
+  const roundOrder = ['R32', 'R16', 'QF', 'SF', 'F'];
   const curIdx = roundOrder.indexOf(tournament.currentRound);
   if (curIdx === -1 || curIdx === roundOrder.length - 1) {
     // Already in Final or unknown
@@ -1039,7 +877,7 @@ export function advanceTournamentRound(tournament: Tournament): boolean {
 
   // Check if all matches in current round are completed
   const curMatches = tournament.matches.filter(m => m.roundName === tournament.currentRound);
-  const allDone = curMatches.length > 0 && curMatches.every(m => m.isCompleted && m.winnerId);
+  const allDone = curMatches.every(m => m.isCompleted && m.winnerId);
   if (!allDone) return false;
 
   const nextRound = roundOrder[curIdx + 1];
@@ -1264,7 +1102,7 @@ export function syncSeasonWithCurrentRankings(season: Season, updatedPlayers: Pl
       return trn;
     }
 
-    const hasStarted = trn.matches.some(m => m.isCompleted) || (trn.qualifyingMatches || []).some(m => m.isCompleted);
+    const hasStarted = trn.matches.some(m => m.isCompleted);
     if (hasStarted) {
       // Tournament in progress: keep bracket progression, update player info on pending matches
       const refreshedMatches = trn.matches.map(m => {
@@ -1276,16 +1114,7 @@ export function syncSeasonWithCurrentRankings(season: Season, updatedPlayers: Pl
           player2: p2Latest ? { ...p2Latest } : m.player2,
         };
       });
-      const refreshedQualMatches = (trn.qualifyingMatches || []).map(m => {
-        const p1Latest = playerMap.get(m.player1.id);
-        const p2Latest = playerMap.get(m.player2.id);
-        return {
-          ...m,
-          player1: p1Latest ? { ...p1Latest } : m.player1,
-          player2: p2Latest ? { ...p2Latest } : m.player2,
-        };
-      });
-      return { ...trn, matches: refreshedMatches, qualifyingMatches: refreshedQualMatches };
+      return { ...trn, matches: refreshedMatches };
     }
 
     // Tournament has NOT started yet: refresh player info with latest ranking/stats while preserving draw integrity

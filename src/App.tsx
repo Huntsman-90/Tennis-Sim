@@ -216,39 +216,24 @@ export default function App() {
   // If spectator tab is opened but no match is active, pick first pending match
   useEffect(() => {
     if (activeTab === 'match' && !activeSpectatorMatch) {
-      const allMatches = [
-        ...(currentTournament.qualifyingMatches || []),
-        ...currentTournament.matches,
-      ];
-      const pendingMatch = allMatches.find(m => !m.isCompleted && m.roundName === currentTournament.currentRound) ||
-                           allMatches.find(m => !m.isCompleted) ||
-                           allMatches[0];
-      if (pendingMatch) {
-        setActiveSpectatorMatch(pendingMatch);
+      const firstPending = currentTournament.matches.find(m => !m.isCompleted);
+      if (firstPending) {
+        setActiveSpectatorMatch(firstPending);
+      } else if (currentTournament.matches.length > 0) {
+        setActiveSpectatorMatch(currentTournament.matches[0]);
       }
     }
   }, [activeTab, activeSpectatorMatch, currentTournament]);
 
   // Handle completed match from spectator view
   const handleMatchCompleteFromViewer = (updatedMatch: Match) => {
-    const targetIdx = season.tournaments.findIndex(
-      t => t.matches.some(m => m.id === updatedMatch.id) ||
-           (t.qualifyingMatches && t.qualifyingMatches.some(m => m.id === updatedMatch.id))
-    );
-    const resolvedIdx = targetIdx !== -1 ? targetIdx : season.currentTournamentIndex;
+    const targetIdx = activeTournamentIndex;
     let completedTrn: Tournament | null = null;
 
     const updatedTournaments = season.tournaments.map((trn, idx) => {
-      if (idx !== resolvedIdx) return trn;
-      const isQual = (trn.qualifyingMatches || []).some(m => m.id === updatedMatch.id);
-      let updated: Tournament;
-      if (isQual) {
-        const updatedQual = (trn.qualifyingMatches || []).map(m => (m.id === updatedMatch.id ? updatedMatch : m));
-        updated = { ...trn, qualifyingMatches: updatedQual };
-      } else {
-        const updatedMatches = trn.matches.map(m => (m.id === updatedMatch.id ? updatedMatch : m));
-        updated = { ...trn, matches: updatedMatches };
-      }
+      if (idx !== targetIdx) return trn;
+      const updatedMatches = trn.matches.map(m => (m.id === updatedMatch.id ? updatedMatch : m));
+      const updated = { ...trn, matches: updatedMatches };
       advanceTournamentRound(updated);
 
       if (updated.completed) {
@@ -282,7 +267,7 @@ export default function App() {
       // Re-seed upcoming unplayed tournaments with latest dynamic player rankings
       const syncedSeason = syncSeasonWithCurrentRankings({
         ...season,
-        currentTournamentIndex: season.currentTournamentIndex,
+        currentTournamentIndex: targetIdx,
         tournaments: updatedTournaments,
         totalMatchesSimulated: totalSimulated,
       }, updatedPlayers);
@@ -298,7 +283,7 @@ export default function App() {
     } else {
       const nextSeason = {
         ...season,
-        currentTournamentIndex: season.currentTournamentIndex,
+        currentTournamentIndex: targetIdx,
         tournaments: updatedTournaments,
         totalMatchesSimulated: totalSimulated,
       };
@@ -316,10 +301,9 @@ export default function App() {
 
   // Handle updates from tournament bracket (round sim, full sim)
   const handleTournamentUpdate = (updatedTournament: Tournament) => {
-    const targetIdx = season.tournaments.findIndex(t => t.id === updatedTournament.id);
-    const resolvedIdx = targetIdx !== -1 ? targetIdx : season.currentTournamentIndex;
+    const targetIdx = activeTournamentIndex;
     const updatedTournaments = season.tournaments.map((trn, idx) => {
-      if (idx !== resolvedIdx) return trn;
+      if (idx !== targetIdx) return trn;
       return updatedTournament;
     });
 
@@ -345,7 +329,7 @@ export default function App() {
       // Re-seed upcoming unplayed tournaments with latest dynamic player rankings
       const syncedSeason = syncSeasonWithCurrentRankings({
         ...season,
-        currentTournamentIndex: season.currentTournamentIndex,
+        currentTournamentIndex: targetIdx,
         tournaments: updatedTournaments,
         totalMatchesSimulated: totalSimulated,
       }, updatedPlayers);
@@ -362,7 +346,7 @@ export default function App() {
       const completedCount = updatedTournament.matches.filter(m => m.isCompleted).length;
       const nextSeason = {
         ...season,
-        currentTournamentIndex: season.currentTournamentIndex,
+        currentTournamentIndex: targetIdx,
         tournaments: updatedTournaments,
         totalMatchesSimulated: totalSimulated,
       };
@@ -378,29 +362,95 @@ export default function App() {
     }
   };
 
-  // Next tournament in season (strict linear sequence, zero overlap)
-  const handleNextTournament = () => {
+  // Set specific tournament as current active tournament in season
+  const handleSetCurrentTournament = (index: number) => {
+    if (index < 0 || index >= season.tournaments.length) return;
+
+    // Find active week
+    const curActive = season.tournaments[season.currentTournamentIndex];
+    const activeWeek = (curActive && !curActive.completed)
+      ? curActive.week
+      : (season.tournaments.find(t => !t.completed)?.week ?? curActive?.week ?? 1);
+
+    // Check if any tournament in active week is currently in progress (has played matches and is NOT completed)
+    const tournamentInProgress = season.tournaments.find(
+      t => t.week === activeWeek && !t.completed && (
+        t.matches.some(m => m.isCompleted) || (t.qualifyingMatches?.some(m => m.isCompleted) ?? false)
+      )
+    );
+
+    const targetTrn = season.tournaments[index];
+
+    // If another tournament is in progress, only allow viewing the requested tournament
+    if (tournamentInProgress && targetTrn && targetTrn.id !== tournamentInProgress.id) {
+      triggerSaveNotification(`🔒 Сначала завершите текущий турнир: ${tournamentInProgress.tour} ${tournamentInProgress.nameRu}!`);
+      setViewingTournamentIndex(index);
+      setActiveSpectatorMatch(null);
+      setActiveTab('tournament');
+      return;
+    }
+
+    setViewingTournamentIndex(null);
+    setSeason(prev => ({
+      ...prev,
+      currentTournamentIndex: index,
+    }));
+    setActiveSpectatorMatch(null);
+    setActiveTab('tournament');
+    if (targetTrn) {
+      triggerSaveNotification(`Выбран турнир: ${targetTrn.tour} ${targetTrn.nameRu}`);
+    }
+  };
+
+  // Next tournament in season (with support for choosing specific tournament or smart week progression)
+  const handleNextTournament = (targetIndex?: number) => {
     setViewingTournamentIndex(null);
     setActiveSpectatorMatch(null);
     setActiveTab('tournament');
 
-    const nextIdx = season.currentTournamentIndex + 1;
-    if (nextIdx < season.tournaments.length) {
+    if (typeof targetIndex === 'number' && targetIndex >= 0 && targetIndex < season.tournaments.length) {
       setSeason(prev => ({
         ...prev,
-        currentTournamentIndex: nextIdx,
+        currentTournamentIndex: targetIndex,
       }));
-      const nextTrn = season.tournaments[nextIdx];
-      if (nextTrn) {
-        triggerSaveNotification(`Следующий турнир: ${nextTrn.tour} ${nextTrn.nameRu}`);
+      const selectedTrn = season.tournaments[targetIndex];
+      if (selectedTrn) {
+        triggerSaveNotification(`Выбран турнир: ${selectedTrn.tour} ${selectedTrn.nameRu}`);
       }
-    } else {
-      // Whole season finished!
-      handleGenerateNextSeason();
+      return;
     }
+
+    // Default smart progression:
+    const currentTrn = season.tournaments[season.currentTournamentIndex];
+    const currentWeek = currentTrn?.week;
+
+    // 1. Look for any remaining uncompleted tournament in current week
+    const nextInSameWeek = season.tournaments.findIndex(
+      (t, idx) => t.week === currentWeek && !t.completed && idx !== season.currentTournamentIndex
+    );
+    if (nextInSameWeek !== -1) {
+      setSeason(prev => ({
+        ...prev,
+        currentTournamentIndex: nextInSameWeek,
+      }));
+      return;
+    }
+
+    // 2. Look for first uncompleted tournament in whole season
+    const firstUncompleted = season.tournaments.findIndex(t => !t.completed);
+    if (firstUncompleted !== -1) {
+      setSeason(prev => ({
+        ...prev,
+        currentTournamentIndex: firstUncompleted,
+      }));
+      return;
+    }
+
+    // 3. Whole season finished!
+    handleGenerateNextSeason();
   };
 
-  // User selects any tournament from bracket bar or calendar to view
+  // User selects any tournament from bracket bar or calendar
   const handleSelectTournament = (idx: number) => {
     setViewingTournamentIndex(idx);
     setActiveSpectatorMatch(null);
@@ -518,6 +568,7 @@ export default function App() {
             tournament={currentTournament}
             season={season}
             onSelectTournament={handleSelectTournament}
+            onSetCurrentTournament={handleSetCurrentTournament}
             onSelectMatchToWatch={handleSelectMatchToWatch}
             onSelectMatchCard={setSelectedMatchForCard}
             onSelectPlayer={handleOpenPlayerModal}
@@ -565,6 +616,7 @@ export default function App() {
           <CalendarView
             season={season}
             onSelectTournament={handleSelectTournament}
+            onSetCurrentTournament={handleSetCurrentTournament}
           />
         )}
 

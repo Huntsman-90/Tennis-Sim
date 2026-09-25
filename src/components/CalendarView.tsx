@@ -5,16 +5,33 @@ import { Season, TourType, TournamentCategory } from '../types';
 interface CalendarViewProps {
   season: Season;
   onSelectTournament: (index: number) => void;
+  onSetCurrentTournament?: (index: number) => void;
 }
 
 type CategoryFilter = 'ALL' | 'SLAM' | '1000' | '500' | '250' | 'FINALS';
 
-export function CalendarView({ season, onSelectTournament }: CalendarViewProps) {
+export function CalendarView({ season, onSelectTournament, onSetCurrentTournament }: CalendarViewProps) {
   const [tourFilter, setTourFilter] = useState<'ALL' | TourType>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const currentTrn = season.tournaments[season.currentTournamentIndex];
+  const activeSeasonWeek = useMemo(() => {
+    const curActive = season.tournaments[season.currentTournamentIndex];
+    if (curActive && !curActive.completed) {
+      return curActive.week;
+    }
+    const firstUncompleted = season.tournaments.find(t => !t.completed);
+    return firstUncompleted ? firstUncompleted.week : (curActive?.week ?? 1);
+  }, [season]);
+
+  // Check if any tournament in the active week is currently in progress (has completed matches, but is not finished)
+  const activeWeekTournamentInProgress = useMemo(() => {
+    return season.tournaments.find(
+      t => t.week === activeSeasonWeek && !t.completed && (
+        t.matches.some(m => m.isCompleted) || (t.qualifyingMatches?.some(m => m.isCompleted) ?? false)
+      )
+    );
+  }, [season, activeSeasonWeek]);
 
   const filteredTournaments = useMemo(() => {
     return season.tournaments
@@ -204,9 +221,15 @@ export function CalendarView({ season, onSelectTournament }: CalendarViewProps) 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
           {filteredTournaments.map(({ trn, originalIndex }) => {
             const isCurrent = originalIndex === season.currentTournamentIndex;
-            const isPast = originalIndex < season.currentTournamentIndex || trn.completed;
-            const isLocked = originalIndex > season.currentTournamentIndex;
+            const isPast = trn.completed;
             const isAtp = trn.tour === 'ATP';
+            const isCurrentWeek = trn.week === activeSeasonWeek;
+            const isPlayableThisWeek = isCurrentWeek && !isPast;
+            const isLockedInWeek = Boolean(
+              isPlayableThisWeek &&
+              activeWeekTournamentInProgress &&
+              activeWeekTournamentInProgress.id !== trn.id
+            );
             const isJoint = season.tournaments.some(
               other => other.week === trn.week && other.tour !== trn.tour && (
                 trn.category === 'Grand Slam' ||
@@ -219,13 +242,23 @@ export function CalendarView({ season, onSelectTournament }: CalendarViewProps) 
               <div
                 key={trn.id}
                 id={`calendar-tournament-card-${originalIndex}`}
-                onClick={() => onSelectTournament(originalIndex)}
+                onClick={() => {
+                  if (isPlayableThisWeek && !isLockedInWeek && onSetCurrentTournament) {
+                    onSetCurrentTournament(originalIndex);
+                  } else {
+                    onSelectTournament(originalIndex);
+                  }
+                }}
                 className={`p-4 rounded-2xl border transition-all flex flex-col justify-between cursor-pointer ${
                   isCurrent
                     ? 'bg-slate-900 border-emerald-500 shadow-lg shadow-emerald-500/10 ring-1 ring-emerald-500/30'
+                    : isPlayableThisWeek && !isLockedInWeek
+                    ? 'bg-slate-900/90 border-slate-700 hover:border-sky-500/60 shadow-sm ring-1 ring-sky-500/20'
+                    : isLockedInWeek
+                    ? 'bg-slate-950/50 border-slate-900/80 opacity-70 hover:opacity-90'
                     : isPast
                     ? 'bg-slate-900/60 border-slate-800/80 hover:border-slate-700'
-                    : 'bg-slate-950/60 border-slate-900 hover:border-slate-800 opacity-75 hover:opacity-95'
+                    : 'bg-slate-950/60 border-slate-900 hover:border-slate-800 opacity-90'
                 }`}
               >
                 <div>
@@ -265,14 +298,19 @@ export function CalendarView({ season, onSelectTournament }: CalendarViewProps) 
                       )}
                     </div>
 
-                    {isCurrent && !trn.completed && (
+                    {isCurrent && !isPast && (
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 animate-pulse">
                         Идёт сейчас
                       </span>
                     )}
-                    {isLocked && (
+                    {isLockedInWeek && (
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1">
                         🔒 Заблокирован
+                      </span>
+                    )}
+                    {isPlayableThisWeek && !isCurrent && !isLockedInWeek && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30 flex items-center gap-1">
+                        🎾 Доступен сейчас
                       </span>
                     )}
                     {isPast && (
@@ -290,9 +328,11 @@ export function CalendarView({ season, onSelectTournament }: CalendarViewProps) 
                   </p>
                   <div className="text-xs text-slate-500 font-mono mt-2 flex items-center justify-between flex-wrap gap-1">
                     <span>📅 Неделя {trn.week} · {trn.dates} ({trn.month})</span>
-                    <span className="text-[10px] text-slate-400 font-sans px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/60">
-                      Турнир #{originalIndex + 1}
-                    </span>
+                    {season.tournaments.filter(t => t.week === trn.week).length > 1 && (
+                      <span className="text-[10px] text-indigo-300 font-sans px-1.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20">
+                        {isCurrentWeek ? 'Турнир текущей недели' : `Турнир недели #${trn.week}`}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -302,24 +342,28 @@ export function CalendarView({ season, onSelectTournament }: CalendarViewProps) 
                     Победителю: <strong className="text-amber-400 font-mono">+{trn.pointsWinner} очков</strong>
                   </span>
 
-                  {isCurrent && !trn.completed ? (
+                  {isLockedInWeek ? (
+                    <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1">
+                      🔒 Ждёт {activeWeekTournamentInProgress?.city}
+                    </span>
+                  ) : isPlayableThisWeek && !isCurrent ? (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        onSelectTournament(originalIndex);
+                        if (onSetCurrentTournament) onSetCurrentTournament(originalIndex);
+                        else onSelectTournament(originalIndex);
                       }}
                       className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition-all cursor-pointer flex items-center gap-1"
                     >
-                      <span>▶ Открыть турнир</span>
+                      <span>▶ Играть</span>
                     </button>
-                  ) : isLocked ? (
-                    <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1">
-                      🔒 Ожидает очереди (#{originalIndex + 1})
-                    </span>
                   ) : (
-                    <span className="text-[11px] text-emerald-400/80 font-medium flex items-center gap-1">
-                      ✓ Завершён
-                    </span>
+                    <button
+                      className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
+                      title="Открыть турнир"
+                    >
+                      <ChevronRight className="w-4 h-4 text-emerald-400" />
+                    </button>
                   )}
                 </div>
               </div>
