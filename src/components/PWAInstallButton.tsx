@@ -51,7 +51,7 @@ export const PWAInstallButton: React.FC = () => {
               <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-xl shadow-sky-500/20 mb-4 border border-sky-500/30 flex items-center justify-center bg-slate-900">
                 <img
                   src="/app-logo.png"
-                  alt="Большой Теннис Logo"
+                  alt="ATP & WTA Tour Logo"
                   className="w-full h-full object-cover"
                   referrerPolicy="no-referrer"
                 />

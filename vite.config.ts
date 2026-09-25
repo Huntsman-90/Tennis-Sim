@@ -21,8 +21,8 @@ export default defineConfig(() => {
         ],
         manifest: {
           id: '/',
-          name: 'Большой Теннис: ATP & WTA Тур',
-          short_name: 'Теннис Тур',
+          name: 'ATP & WTA Tour',
+          short_name: 'ATP & WTA',
           description:
             'Полноценный симулятор теннисного сезона ATP и WTA с реальными правилами, турнирной сеткой, зрительским режимом и оффлайн поддержкой.',
           theme_color: '#090d16',

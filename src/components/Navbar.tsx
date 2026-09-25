@@ -41,16 +41,10 @@ export function Navbar({
             <div>
               <div className="flex items-center gap-1.5 sm:gap-2">
                 <span className="font-extrabold text-white text-xs sm:text-base md:text-lg tracking-tight">
-                  <span className="hidden sm:inline">Большой Теннис</span>
-                  <span className="sm:hidden">Теннис</span>
+                  <span className="hidden sm:inline">ATP &amp; WTA Tour</span>
+                  <span className="sm:hidden">ATP &amp; WTA</span>
                 </span>
-                <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30">
-                  ATP
-                </span>
-                <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                  WTA
-                </span>
-                <span className="text-[10px] sm:text-[11px] font-bold text-slate-400 font-mono hidden md:inline">
+                <span className="px-1.5 py-0.5 rounded-md text-[10px] sm:text-[11px] font-bold bg-slate-800 text-slate-300 border border-slate-700 font-mono">
                   {year}
                 </span>
               </div>
