@@ -351,24 +351,57 @@ export function finalizeTournamentAndDistributePoints(
         roundPoints = tournament.pointsR32;
         roundPrize = Math.round(tournament.prizeMoneyPool * 0.009);
         pointsMap.set(loserId, { points: roundPoints, prize: roundPrize, wonTitle: false });
+      } else if (m.roundName === '1/32 финала' && loserId && !pointsMap.has(loserId)) {
+        roundPoints = tournament.pointsR64;
+        roundPrize = Math.round(tournament.prizeMoneyPool * 0.004);
+        pointsMap.set(loserId, { points: roundPoints, prize: roundPrize, wonTitle: false });
       }
     }
   });
 
   const updatedPlayers = players.map((p) => {
+    if (p.tour !== tournament.tour) return p;
+
+    const tourneyPointsHistory = p.tournamentPoints || {};
+    // Defended points = points earned at this specific tournament in the previous season edition
+    const defendedPoints = tourneyPointsHistory[tournament.id] || 0;
+
+    let earnedPoints = 0;
+    let prize = 0;
+    let wonTitle = false;
+
     if (pointsMap.has(p.id)) {
       const award = pointsMap.get(p.id)!;
-      return {
-        ...p,
-        previousPoints: p.points,
-        points: p.points + award.points,
-        prizeMoney: p.prizeMoney + award.prize,
-        titles: award.wonTitle ? p.titles + 1 : p.titles,
-        careerTitles: award.wonTitle ? p.careerTitles + 1 : p.careerTitles,
-        grandSlams: award.wonTitle && tournament.category === 'Grand Slam' ? p.grandSlams + 1 : p.grandSlams,
-      };
+      earnedPoints = award.points;
+      prize = award.prize;
+      wonTitle = award.wonTitle;
+    } else {
+      const playedInTournament = tournament.matches.some(
+        (m) => m.player1Id === p.id || m.player2Id === p.id
+      );
+      if (playedInTournament) {
+        earnedPoints = tournament.pointsR128 || tournament.pointsR64 || 0;
+      }
     }
-    return p;
+
+    const updatedTourneyPoints = {
+      ...tourneyPointsHistory,
+      [tournament.id]: earnedPoints,
+    };
+
+    const netPointsChange = earnedPoints - defendedPoints;
+    const newPoints = Math.max(0, p.points + netPointsChange);
+
+    return {
+      ...p,
+      previousPoints: p.points,
+      points: newPoints,
+      tournamentPoints: updatedTourneyPoints,
+      prizeMoney: p.prizeMoney + prize,
+      titles: wonTitle ? p.titles + 1 : p.titles,
+      careerTitles: wonTitle ? p.careerTitles + 1 : p.careerTitles,
+      grandSlams: wonTitle && tournament.category === 'Grand Slam' ? p.grandSlams + 1 : p.grandSlams,
+    };
   });
 
   return recalculateRankings(updatedPlayers);

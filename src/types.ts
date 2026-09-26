@@ -41,6 +41,7 @@ export interface Player {
   handedness: 'Right' | 'Left';
   backhandType: 'One-handed' | 'Two-handed';
   stats: PlayerStats;
+  tournamentPoints?: Record<string, number>;
   retired?: boolean;
 }
 

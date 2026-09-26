@@ -39,9 +39,21 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
             {player.flag}
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                 #{player.rank} в мире
+              </span>
+              {player.previousRank !== player.rank && (
+                <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded border ${
+                  player.previousRank > player.rank
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                    : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                }`}>
+                  {player.previousRank > player.rank ? `↑${player.previousRank - player.rank}` : `↓${player.rank - player.previousRank}`}
+                </span>
+              )}
+              <span className="text-xs font-bold text-emerald-400 font-mono bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
+                {player.points.toLocaleString('en-US')} pts
               </span>
               <span className="text-xs font-bold text-slate-400">
                 {player.tour} Тур

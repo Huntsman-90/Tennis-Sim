@@ -63,11 +63,13 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
     }
   );
 
-  const logsEndRef = useRef<HTMLDivElement>(null);
+  const logsContainerRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll logs
+  // Auto-scroll internal log container only (without shifting browser window)
   useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (logsContainerRef.current) {
+      logsContainerRef.current.scrollTop = logsContainerRef.current.scrollHeight;
+    }
   }, [pointLogs]);
 
   // Point simulator step
@@ -133,7 +135,7 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
       // Check Tiebreak won (7 points with 2 pt margin)
       if ((newTb[0] >= 7 || newTb[1] >= 7) && Math.abs(newTb[0] - newTb[1]) >= 2) {
         const tbWinner = newTb[0] > newTb[1] ? 1 : 2;
-        handleSetWon(tbWinner, true);
+        handleSetWon(tbWinner, true, sets);
       }
       return;
     }
@@ -168,9 +170,9 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
 
     // Check Set Won
     if (currSet[0] >= 6 && currSet[0] - currSet[1] >= 2) {
-      handleSetWon(1, false);
+      handleSetWon(1, false, updatedSets);
     } else if (currSet[1] >= 6 && currSet[1] - currSet[0] >= 2) {
-      handleSetWon(2, false);
+      handleSetWon(2, false, updatedSets);
     } else if (currSet[0] === 6 && currSet[1] === 6) {
       // Enter Tiebreak!
       setInTiebreak(true);
@@ -179,19 +181,20 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
     }
   };
 
-  const handleSetWon = (setWinner: 1 | 2, wasTiebreak: boolean) => {
+  const handleSetWon = (setWinner: 1 | 2, wasTiebreak: boolean, currentSets: Array<[number, number]>) => {
     setInTiebreak(false);
     setTiebreakScore([0, 0]);
     setCurrentGamePoints([0, 0]);
 
-    const updatedSets = [...sets];
+    let updatedSets = JSON.parse(JSON.stringify(currentSets)) as Array<[number, number]>;
     if (wasTiebreak) {
       const curr = [...updatedSets[currentSetIdx]] as [number, number];
       if (setWinner === 1) curr[0] = 7;
       else curr[1] = 7;
       updatedSets[currentSetIdx] = curr;
-      setSets(updatedSets);
     }
+
+    setSets(updatedSets);
 
     // Count sets won
     let p1Sets = 0;
@@ -222,7 +225,8 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
       onMatchFinished(match.id, winnerId, finalScore);
     } else {
       // Start next set
-      setSets([...updatedSets, [0, 0]]);
+      const nextSets = [...updatedSets, [0, 0]] as Array<[number, number]>;
+      setSets(nextSets);
       setCurrentSetIdx((idx) => idx + 1);
     }
   };
@@ -489,7 +493,7 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
         <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-2">
           <span>Текстовая трансляция розыгрышей</span>
         </h3>
-        <div className="max-h-48 overflow-y-auto space-y-1.5 font-mono text-xs text-slate-300 pr-2">
+        <div ref={logsContainerRef} className="max-h-48 overflow-y-auto space-y-1.5 font-mono text-xs text-slate-300 pr-2">
           {pointLogs.length === 0 ? (
             <div className="text-slate-500 italic py-3 text-center">
               Нажмите «Сыграть 1 розыгрыш» или «Автоигра» для начала матча
@@ -512,7 +516,6 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
               </div>
             ))
           )}
-          <div ref={logsEndRef} />
         </div>
       </div>
 
