@@ -6,3 +6,17 @@ coverage/
 *.log
 .env*
 !.env.example
+
+screenshots/
+
+*.pid
+
+.agents/
+
+.agentsweb/
+
+.omgithub-runtime/
+
+.opencode-ssh/
+
+.opencode-web/
