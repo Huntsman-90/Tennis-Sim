@@ -135,7 +135,7 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
       // Check Tiebreak won (7 points with 2 pt margin)
       if ((newTb[0] >= 7 || newTb[1] >= 7) && Math.abs(newTb[0] - newTb[1]) >= 2) {
         const tbWinner = newTb[0] > newTb[1] ? 1 : 2;
-        handleSetWon(tbWinner, true, sets);
+        handleSetWon(tbWinner, true, sets, updatedStats);
       }
       return;
     }
@@ -146,15 +146,15 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
 
     // Game won check
     if (newP1Pt >= 4 && newP1Pt - newP2Pt >= 2) {
-      handleGameWon(1);
+      handleGameWon(1, updatedStats);
     } else if (newP2Pt >= 4 && newP2Pt - newP1Pt >= 2) {
-      handleGameWon(2);
+      handleGameWon(2, updatedStats);
     } else {
       setCurrentGamePoints([newP1Pt, newP2Pt]);
     }
   };
 
-  const handleGameWon = (gameWinner: 1 | 2) => {
+  const handleGameWon = (gameWinner: 1 | 2, pointStats: MatchDetailedStats) => {
     soundFx.playCrowdApplause();
     setCurrentGamePoints([0, 0]);
     const updatedSets = [...sets];
@@ -170,9 +170,9 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
 
     // Check Set Won
     if (currSet[0] >= 6 && currSet[0] - currSet[1] >= 2) {
-      handleSetWon(1, false, updatedSets);
+      handleSetWon(1, false, updatedSets, pointStats);
     } else if (currSet[1] >= 6 && currSet[1] - currSet[0] >= 2) {
-      handleSetWon(2, false, updatedSets);
+      handleSetWon(2, false, updatedSets, pointStats);
     } else if (currSet[0] === 6 && currSet[1] === 6) {
       // Enter Tiebreak!
       setInTiebreak(true);
@@ -181,7 +181,12 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
     }
   };
 
-  const handleSetWon = (setWinner: 1 | 2, wasTiebreak: boolean, currentSets: Array<[number, number]>) => {
+  const handleSetWon = (
+    setWinner: 1 | 2,
+    wasTiebreak: boolean,
+    currentSets: Array<[number, number]>,
+    pointStats: MatchDetailedStats
+  ) => {
     setInTiebreak(false);
     setTiebreakScore([0, 0]);
     setCurrentGamePoints([0, 0]);
@@ -219,7 +224,7 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
         sets: updatedSets,
         winnerId,
         durationMinutes: 45 * updatedSets.length + Math.floor(Math.random() * 20),
-        stats,
+        stats: pointStats,
       };
 
       onMatchFinished(match.id, winnerId, finalScore);

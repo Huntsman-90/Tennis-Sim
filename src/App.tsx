@@ -99,16 +99,19 @@ export function App() {
       targetMatch.score = score;
     }
 
-    const { updatedTournament, updatedPlayers } = advanceTournamentMatch(
+    const { updatedTournament: advancedTournament, updatedPlayers } = advanceTournamentMatch(
       currTourn,
       matchId,
       winnerId,
       players
     );
 
+    let updatedTournament = advancedTournament;
     let finalPlayers = updatedPlayers;
     if (updatedTournament.isCompleted) {
-      finalPlayers = finalizeTournamentAndDistributePoints(updatedTournament, updatedPlayers);
+      const finalized = finalizeTournamentAndDistributePoints(updatedTournament, updatedPlayers);
+      updatedTournament = finalized.updatedTournament;
+      finalPlayers = finalized.updatedPlayers;
     }
 
     updatedTournaments[season.currentTournamentIndex] = updatedTournament;
@@ -137,16 +140,19 @@ export function App() {
       targetMatch.score = sim.score;
     }
 
-    const { updatedTournament, updatedPlayers } = advanceTournamentMatch(
+    const { updatedTournament: advancedTournament, updatedPlayers } = advanceTournamentMatch(
       currTourn,
       match.id,
       sim.winnerId,
       players
     );
 
+    let updatedTournament = advancedTournament;
     let finalPlayers = updatedPlayers;
     if (updatedTournament.isCompleted) {
-      finalPlayers = finalizeTournamentAndDistributePoints(updatedTournament, updatedPlayers);
+      const finalized = finalizeTournamentAndDistributePoints(updatedTournament, updatedPlayers);
+      updatedTournament = finalized.updatedTournament;
+      finalPlayers = finalized.updatedPlayers;
     }
 
     updatedTournaments[season.currentTournamentIndex] = updatedTournament;
@@ -179,7 +185,8 @@ export function App() {
         const p2 = currPlayers.find((p) => p.id === m.player2Id);
         if (p1 && p2) {
           const sim = simulateFullMatch(p1, p2, currTourn.surface, currTourn.setsToWin);
-          m.score = sim.score;
+          const currentMatch = currTourn.matches.find((candidate) => candidate.id === m.id);
+          if (currentMatch) currentMatch.score = sim.score;
           const adv = advanceTournamentMatch(currTourn, m.id, sim.winnerId, currPlayers);
           currTourn = adv.updatedTournament;
           currPlayers = adv.updatedPlayers;
@@ -188,7 +195,9 @@ export function App() {
     }
 
     if (currTourn.isCompleted) {
-      currPlayers = finalizeTournamentAndDistributePoints(currTourn, currPlayers);
+      const finalized = finalizeTournamentAndDistributePoints(currTourn, currPlayers);
+      currTourn = finalized.updatedTournament;
+      currPlayers = finalized.updatedPlayers;
     }
 
     updatedTournaments[season.currentTournamentIndex] = currTourn;

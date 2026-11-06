@@ -117,6 +117,7 @@ export interface Tournament {
   pointsR128: number;
   prizeMoneyPool: number;
   isCompleted: boolean;
+  pointsDistributed?: boolean;
   currentRound: number;
   matches: Match[];
   championId?: string;

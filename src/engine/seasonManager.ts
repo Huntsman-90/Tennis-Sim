@@ -16,8 +16,16 @@ export function initializeNewSeason(players: Player[], year: number = 2026): Sea
   };
 }
 
+export function getBracketRoundCount(drawSize: number): number {
+  return Math.max(1, Math.ceil(Math.log2(Math.max(2, drawSize))));
+}
+
+function getBracketSize(drawSize: number): number {
+  return 2 ** getBracketRoundCount(drawSize);
+}
+
 export function getStandardBracketSeeding(drawSize: number): number[] {
-  const rounds = Math.log2(drawSize);
+  const rounds = getBracketRoundCount(drawSize);
   let list = [1, 2];
   for (let r = 1; r < rounds; r++) {
     const nextList: number[] = [];
@@ -33,8 +41,121 @@ export function getStandardBracketSeeding(drawSize: number): number[] {
     }
     list = nextList;
   }
-  // Convert 1-based seed numbers (1..N) to 0-based indices (0..N-1)
+  // The unfilled seed positions in a non-power-of-two draw become byes.
   return list.map((seed) => seed - 1);
+}
+
+function createBracketMatches(
+  tournamentId: string,
+  drawSize: number,
+  seededDraw: Array<Player | undefined>
+): Match[] {
+  const totalRounds = getBracketRoundCount(drawSize);
+  const bracketSize = getBracketSize(drawSize);
+  const rounds: Match[][] = [];
+
+  for (let round = 0; round < totalRounds; round++) {
+    const matchCount = bracketSize / (2 ** (round + 1));
+    const matches = Array.from({ length: matchCount }, (_, index): Match => {
+      const match: Match = {
+        id: `${tournamentId}-r${round}-m${index}`,
+        tournamentId,
+        round,
+        roundName: getRoundName(round, totalRounds),
+        player1Id: null,
+        player2Id: null,
+        isCompleted: false,
+      };
+      if (round === 0) {
+        const p1 = seededDraw[index * 2];
+        const p2 = seededDraw[index * 2 + 1];
+        match.player1Id = p1?.id || null;
+        match.player2Id = p2?.id || null;
+        if (p1 && p1.rank <= 32) match.seed1 = p1.rank;
+        if (p2 && p2.rank <= 32) match.seed2 = p2.rank;
+      }
+      return match;
+    });
+    rounds.push(matches);
+  }
+
+  for (let round = 0; round < totalRounds - 1; round++) {
+    rounds[round].forEach((match, index) => {
+      match.nextMatchId = rounds[round + 1][Math.floor(index / 2)].id;
+      match.nextMatchSlot = index % 2 === 0 ? 1 : 2;
+    });
+  }
+  return rounds.flat();
+}
+
+function resolveBracketByes(tournament: Tournament): void {
+  const totalRounds = getBracketRoundCount(tournament.drawSize);
+  for (let round = 0; round < totalRounds; round++) {
+    const matches = tournament.matches.filter((match) => match.round === round);
+    for (const match of matches) {
+      if (round === 0) {
+        if (!match.player1Id || !match.player2Id) {
+          match.isCompleted = true;
+          match.winnerId = match.player1Id || match.player2Id || undefined;
+          match.score = undefined;
+        } else if (match.isCompleted && (!match.winnerId || ![match.player1Id, match.player2Id].includes(match.winnerId))) {
+          match.isCompleted = false;
+          match.winnerId = undefined;
+          match.score = undefined;
+        }
+        continue;
+      }
+
+      const childMatches = tournament.matches
+        .filter((child) => child.round === round - 1 && child.nextMatchId === match.id)
+        .sort((a, b) => (a.nextMatchSlot || 0) - (b.nextMatchSlot || 0));
+      if (childMatches.length !== 2) continue;
+
+      const [first, second] = childMatches;
+      match.player1Id = first.isCompleted ? first.winnerId || null : null;
+      match.player2Id = second.isCompleted ? second.winnerId || null : null;
+      match.seed1 = first.isCompleted && first.winnerId === first.player1Id
+        ? first.seed1
+        : first.isCompleted && first.winnerId === first.player2Id ? first.seed2 : undefined;
+      match.seed2 = second.isCompleted && second.winnerId === second.player1Id
+        ? second.seed1
+        : second.isCompleted && second.winnerId === second.player2Id ? second.seed2 : undefined;
+
+      if (!first.isCompleted || !second.isCompleted) {
+        match.isCompleted = false;
+        match.winnerId = undefined;
+        match.score = undefined;
+        continue;
+      }
+
+      const participants = [match.player1Id, match.player2Id].filter((id): id is string => Boolean(id));
+      if (participants.length < 2) {
+        match.isCompleted = true;
+        match.winnerId = participants[0];
+        match.score = undefined;
+      } else if (
+        match.isCompleted &&
+        (!match.score || !match.winnerId || !participants.includes(match.winnerId))
+      ) {
+        // A former bye is now a real match after a bracket repair or player fill-in.
+        match.isCompleted = false;
+        match.winnerId = undefined;
+        match.score = undefined;
+      }
+    }
+  }
+
+  const finalMatch = tournament.matches.find((match) => match.round === totalRounds - 1);
+  if (finalMatch?.isCompleted && finalMatch.winnerId) {
+    tournament.isCompleted = true;
+    tournament.championId = finalMatch.winnerId;
+    const loserId = finalMatch.player1Id === finalMatch.winnerId ? finalMatch.player2Id : finalMatch.player1Id;
+    tournament.runnerUpId = loserId || undefined;
+  } else {
+    tournament.isCompleted = false;
+    tournament.championId = undefined;
+    tournament.runnerUpId = undefined;
+  }
 }
 
 export function generateTournamentDraw(
@@ -45,175 +166,174 @@ export function generateTournamentDraw(
   const eligiblePlayers = allPlayers
     .filter((p) => p.tour === template.tour && !p.retired)
     .sort((a, b) => a.rank - b.rank);
+  const tournamentPlayers = eligiblePlayers.slice(0, template.drawSize);
+  const seededIndices = getStandardBracketSeeding(template.drawSize);
+  const seededDraw = new Array<Player | undefined>(getBracketSize(template.drawSize));
 
-  const drawSize = template.drawSize;
-  const numRounds = Math.log2(drawSize);
+  seededIndices.forEach((playerIndex, slot) => {
+    seededDraw[slot] = tournamentPlayers[playerIndex];
+  });
 
-  // Take top ranked players up to drawSize
-  const tournamentPlayers = eligiblePlayers.slice(0, drawSize);
-
-  // Standard Tennis Seeding Placement (Seed 1 at top, Seed 2 at bottom, Seeds 3-4 in opposite halves)
-  const seededIndices = getStandardBracketSeeding(drawSize);
-  const seededDraw: Player[] = new Array(drawSize);
-
-  for (let slot = 0; slot < drawSize; slot++) {
-    const playerIdx = seededIndices[slot];
-    seededDraw[slot] = tournamentPlayers[playerIdx] || tournamentPlayers[slot % tournamentPlayers.length];
-  }
-
-  // Generate matches round by round
-  let currentRoundSize = drawSize / 2;
-  const roundMatchesMap: Map<number, Match[]> = new Map();
-
-  for (let round = 0; round < numRounds; round++) {
-    const roundMatches: Match[] = [];
-    const isFirstRound = round === 0;
-    const roundName = getRoundName(round, numRounds);
-
-    for (let m = 0; m < currentRoundSize; m++) {
-      const matchId = `${template.id}-r${round}-m${m}`;
-
-      let p1Id: string | null = null;
-      let p2Id: string | null = null;
-      let s1: number | undefined = undefined;
-      let s2: number | undefined = undefined;
-
-      if (isFirstRound) {
-        const p1 = seededDraw[m * 2];
-        const p2 = seededDraw[m * 2 + 1];
-        p1Id = p1 ? p1.id : null;
-        p2Id = p2 ? p2.id : null;
-        if (p1 && p1.rank <= 32) s1 = p1.rank;
-        if (p2 && p2.rank <= 32) s2 = p2.rank;
-      }
-
-      const match: Match = {
-        id: matchId,
-        tournamentId: template.id,
-        round,
-        roundName,
-        player1Id: p1Id,
-        player2Id: p2Id,
-        seed1: s1,
-        seed2: s2,
-        isCompleted: false,
-      };
-
-      roundMatches.push(match);
-    }
-
-    roundMatchesMap.set(round, roundMatches);
-    currentRoundSize /= 2;
-  }
-
-  // Link child matches to next match IDs
-  for (let round = 0; round < numRounds - 1; round++) {
-    const currMatches = roundMatchesMap.get(round)!;
-    const nextMatches = roundMatchesMap.get(round + 1)!;
-
-    for (let i = 0; i < currMatches.length; i++) {
-      const targetNextMatch = nextMatches[Math.floor(i / 2)];
-      currMatches[i].nextMatchId = targetNextMatch.id;
-      currMatches[i].nextMatchSlot = (i % 2 === 0 ? 1 : 2);
-    }
-  }
-
-  const allMatchesList: Match[] = [];
-  for (let r = 0; r < numRounds; r++) {
-    allMatchesList.push(...roundMatchesMap.get(r)!);
-  }
-
-  return {
+  const tournament: Tournament = {
     ...template,
-    matches: allMatchesList,
+    matches: createBracketMatches(template.id, template.drawSize, seededDraw),
     isCompleted: false,
     currentRound: 0,
   };
+  resolveBracketByes(tournament);
+  return tournament;
 }
 
 export function repairTournamentBracket(tournament: Tournament, allPlayers: Player[]): Tournament {
-  const updatedTournament = JSON.parse(JSON.stringify(tournament)) as Tournament;
+  const totalRounds = getBracketRoundCount(tournament.drawSize);
+  const completedFinal = tournament.matches.find((match) => match.round === totalRounds - 1);
+  if (
+    tournament.isCompleted && completedFinal?.isCompleted && completedFinal.winnerId &&
+    [completedFinal.player1Id, completedFinal.player2Id].includes(completedFinal.winnerId)
+  ) {
+    // Finished tournaments are historical records; ranking changes must not rewrite their draw/results.
+    const preserved = JSON.parse(JSON.stringify(tournament)) as Tournament;
+    const finalMatch = preserved.matches.find((match) => match.round === totalRounds - 1)!;
+    preserved.championId = finalMatch.winnerId;
+    preserved.runnerUpId = finalMatch.player1Id === finalMatch.winnerId
+      ? finalMatch.player2Id || undefined
+      : finalMatch.player1Id || undefined;
+    preserved.currentRound = totalRounds;
+    return preserved;
+  }
+
+  const bracketSize = getBracketSize(tournament.drawSize);
+  const hasValidShape = Array.from({ length: totalRounds }, (_, round) => {
+    const expectedCount = bracketSize / (2 ** (round + 1));
+    return tournament.matches.filter((match) => match.round === round).length === expectedCount;
+  }).every(Boolean);
+  const oldMatches = new Map(tournament.matches.map((match) => [match.id, match]));
+  const repaired = hasValidShape
+    ? JSON.parse(JSON.stringify(tournament)) as Tournament
+    : generateTournamentDraw(tournament, allPlayers);
   const eligiblePlayers = allPlayers
-    .filter((p) => p.tour === updatedTournament.tour && !p.retired)
-    .sort((a, b) => a.rank - b.rank);
+    .filter((player) => player.tour === repaired.tour && !player.retired)
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, repaired.drawSize);
+  const eligibleById = new Map(eligiblePlayers.map((player) => [player.id, player]));
+  const firstRound = repaired.matches
+    .filter((match) => match.round === 0)
+    .sort((a, b) => Number(a.id.split('-m').pop()) - Number(b.id.split('-m').pop()));
+  const generatedFirstRound = generateTournamentDraw(repaired, allPlayers).matches
+    .filter((match) => match.round === 0)
+    .sort((a, b) => Number(a.id.split('-m').pop()) - Number(b.id.split('-m').pop()));
+  const assigned = new Set<string>();
+  let entrantCount = 0;
 
-  const numRounds = Math.log2(updatedTournament.drawSize);
-
-  // Group matches by round
-  const roundMatchesMap = new Map<number, Match[]>();
-  for (let r = 0; r < numRounds; r++) {
-    roundMatchesMap.set(r, updatedTournament.matches.filter((m) => m.round === r));
+  // Keep the existing entrants and their positions, but never exceed the tournament's draw size.
+  for (const match of firstRound) {
+    const oldMatch = oldMatches.get(match.id);
+    for (const slot of [1, 2] as const) {
+      const playerId = slot === 1 ? oldMatch?.player1Id : oldMatch?.player2Id;
+      if (!playerId || !eligibleById.has(playerId) || assigned.has(playerId) || entrantCount >= repaired.drawSize) {
+        if (slot === 1) match.player1Id = null;
+        else match.player2Id = null;
+        continue;
+      }
+      if (slot === 1) {
+        match.player1Id = playerId;
+        match.seed1 = oldMatch?.seed1 || eligibleById.get(playerId)?.rank;
+      } else {
+        match.player2Id = playerId;
+        match.seed2 = oldMatch?.seed2 || eligibleById.get(playerId)?.rank;
+      }
+      assigned.add(playerId);
+      entrantCount++;
+    }
   }
 
-  // 1. Ensure all nextMatchId / nextMatchSlot links are completely valid
-  for (let round = 0; round < numRounds - 1; round++) {
-    const currMatches = roundMatchesMap.get(round) || [];
-    const nextMatches = roundMatchesMap.get(round + 1) || [];
+  // Add eligible players into their seeded positions first; remaining vacancies stay byes.
+  for (const generated of generatedFirstRound) {
+    const target = firstRound.find((match) => match.id === generated.id);
+    if (!target) continue;
+    for (const slot of [1, 2] as const) {
+      const playerId = slot === 1 ? generated.player1Id : generated.player2Id;
+      const isVacant = slot === 1 ? !target.player1Id : !target.player2Id;
+      if (!isVacant || !playerId || assigned.has(playerId) || entrantCount >= repaired.drawSize) continue;
+      if (slot === 1) {
+        target.player1Id = playerId;
+        target.seed1 = generated.seed1;
+      } else {
+        target.player2Id = playerId;
+        target.seed2 = generated.seed2;
+      }
+      assigned.add(playerId);
+      entrantCount++;
+    }
+  }
+  for (const player of eligiblePlayers) {
+    if (entrantCount >= repaired.drawSize) break;
+    if (assigned.has(player.id)) continue;
+    const vacant = firstRound.flatMap((match) => [
+      { match, slot: 1 as const },
+      { match, slot: 2 as const },
+    ]).find(({ match, slot }) => slot === 1 ? !match.player1Id : !match.player2Id);
+    if (!vacant) break;
+    if (vacant.slot === 1) {
+      vacant.match.player1Id = player.id;
+      vacant.match.seed1 = player.rank;
+    } else {
+      vacant.match.player2Id = player.id;
+      vacant.match.seed2 = player.rank;
+    }
+    assigned.add(player.id);
+    entrantCount++;
+  }
 
-    for (let i = 0; i < currMatches.length; i++) {
-      const targetNextMatch = nextMatches[Math.floor(i / 2)];
-      if (targetNextMatch) {
-        currMatches[i].nextMatchId = targetNextMatch.id;
-        currMatches[i].nextMatchSlot = (i % 2 === 0 ? 1 : 2);
+  for (let round = 0; round < totalRounds; round++) {
+    const matches = repaired.matches.filter((match) => match.round === round)
+      .sort((a, b) => Number(a.id.split('-m').pop()) - Number(b.id.split('-m').pop()));
+    const nextMatches = repaired.matches.filter((match) => match.round === round + 1)
+      .sort((a, b) => Number(a.id.split('-m').pop()) - Number(b.id.split('-m').pop()));
+    matches.forEach((match, index) => {
+      match.roundName = getRoundName(round, totalRounds);
+      match.nextMatchId = round < totalRounds - 1 ? nextMatches[Math.floor(index / 2)]?.id : undefined;
+      match.nextMatchSlot = round < totalRounds - 1 ? (index % 2 === 0 ? 1 : 2) : undefined;
+      if (round > 0) {
+        match.player1Id = null;
+        match.player2Id = null;
+        match.seed1 = undefined;
+        match.seed2 = undefined;
+      }
+      match.isCompleted = false;
+      match.winnerId = undefined;
+      match.score = undefined;
+    });
+  }
+  repaired.isCompleted = false;
+  repaired.championId = undefined;
+  repaired.runnerUpId = undefined;
+  repaired.currentRound = 0;
+
+  // Restore results only when the exact participants in that match are unchanged.
+  const restoreCompatibleResults = (round: number) => {
+    for (const match of repaired.matches.filter((candidate) => candidate.round === round)) {
+      const oldMatch = oldMatches.get(match.id);
+      if (
+        oldMatch?.isCompleted && oldMatch.winnerId &&
+        oldMatch.player1Id === match.player1Id && oldMatch.player2Id === match.player2Id &&
+        match.player1Id && match.player2Id &&
+        (oldMatch.winnerId === match.player1Id || oldMatch.winnerId === match.player2Id)
+      ) {
+        match.isCompleted = true;
+        match.winnerId = oldMatch.winnerId;
+        match.score = oldMatch.score;
       }
     }
+  };
+  restoreCompatibleResults(0);
+  resolveBracketByes(repaired);
+  for (let round = 1; round < totalRounds; round++) {
+    restoreCompatibleResults(round);
+    resolveBracketByes(repaired);
   }
-
-  // 2. Fix missing players in Round 0
-  const r0Matches = roundMatchesMap.get(0) || [];
-  const assignedPlayerIds = new Set<string>();
-  r0Matches.forEach((m) => {
-    if (m.player1Id) assignedPlayerIds.add(m.player1Id);
-    if (m.player2Id) assignedPlayerIds.add(m.player2Id);
-  });
-
-  const unassignedPlayers = eligiblePlayers.filter((p) => !assignedPlayerIds.has(p.id));
-  let unassignedIdx = 0;
-
-  r0Matches.forEach((m) => {
-    if (!m.player1Id && unassignedIdx < unassignedPlayers.length) {
-      m.player1Id = unassignedPlayers[unassignedIdx++].id;
-      const pObj = allPlayers.find((p) => p.id === m.player1Id);
-      if (pObj && pObj.rank <= 32) m.seed1 = pObj.rank;
-    }
-    if (!m.player2Id && unassignedIdx < unassignedPlayers.length) {
-      m.player2Id = unassignedPlayers[unassignedIdx++].id;
-      const pObj = allPlayers.find((p) => p.id === m.player2Id);
-      if (pObj && pObj.rank <= 32) m.seed2 = pObj.rank;
-    }
-  });
-
-  // 3. Propagate completed match winners forward to next round matches
-  for (let round = 0; round < numRounds - 1; round++) {
-    const currMatches = roundMatchesMap.get(round) || [];
-    for (const match of currMatches) {
-      if (match.isCompleted && match.winnerId && match.nextMatchId) {
-        const nextMatch = updatedTournament.matches.find((m) => m.id === match.nextMatchId);
-        if (nextMatch) {
-          if (match.nextMatchSlot === 1) {
-            nextMatch.player1Id = match.winnerId;
-            const pObj = allPlayers.find((p) => p.id === match.winnerId);
-            if (pObj && pObj.rank <= 32) nextMatch.seed1 = pObj.rank;
-          } else {
-            nextMatch.player2Id = match.winnerId;
-            const pObj = allPlayers.find((p) => p.id === match.winnerId);
-            if (pObj && pObj.rank <= 32) nextMatch.seed2 = pObj.rank;
-          }
-        }
-      }
-    }
-  }
-
-  // 4. Check if final completed
-  const finalMatch = updatedTournament.matches.find((m) => m.round === numRounds - 1);
-  if (finalMatch && finalMatch.isCompleted && finalMatch.winnerId) {
-    updatedTournament.isCompleted = true;
-    updatedTournament.championId = finalMatch.winnerId;
-    const loserId = finalMatch.player1Id === finalMatch.winnerId ? finalMatch.player2Id : finalMatch.player1Id;
-    if (loserId) updatedTournament.runnerUpId = loserId;
-  }
-
-  return updatedTournament;
+  repaired.currentRound = repaired.matches.find((match) => !match.isCompleted)?.round ?? totalRounds;
+  return repaired;
 }
 
 export function repairSeasonState(season: SeasonState, allPlayers: Player[]): SeasonState {
@@ -253,7 +373,13 @@ export function advanceTournamentMatch(
 ): { updatedTournament: Tournament; updatedPlayers: Player[] } {
   const updatedTournament = JSON.parse(JSON.stringify(tournament)) as Tournament;
   const match = updatedTournament.matches.find((m) => m.id === matchId);
-  if (!match) return { updatedTournament, updatedPlayers: players };
+  if (
+    !match || match.isCompleted ||
+    (match.player1Id !== winnerId && match.player2Id !== winnerId) ||
+    !match.player1Id || !match.player2Id
+  ) {
+    return { updatedTournament, updatedPlayers: players };
+  }
 
   match.isCompleted = true;
   match.winnerId = winnerId;
@@ -274,14 +400,10 @@ export function advanceTournamentMatch(
     }
   }
 
-  // Check if final match
-  const maxRound = Math.log2(updatedTournament.drawSize) - 1;
-  if (match.round === maxRound) {
-    updatedTournament.isCompleted = true;
-    updatedTournament.championId = winnerId;
-    const loserId = match.player1Id === winnerId ? match.player2Id : match.player1Id;
-    if (loserId) updatedTournament.runnerUpId = loserId;
-  }
+  resolveBracketByes(updatedTournament);
+  const totalRounds = getBracketRoundCount(updatedTournament.drawSize);
+  const nextUnplayedRound = updatedTournament.matches.find((candidate) => !candidate.isCompleted)?.round;
+  updatedTournament.currentRound = nextUnplayedRound ?? totalRounds;
 
   // Update player form / match records
   const updatedPlayers = players.map((p) => {
@@ -309,53 +431,56 @@ export function advanceTournamentMatch(
 export function finalizeTournamentAndDistributePoints(
   tournament: Tournament,
   players: Player[]
-): Player[] {
+): { updatedTournament: Tournament; updatedPlayers: Player[] } {
+  if (!tournament.isCompleted || tournament.pointsDistributed) {
+    return { updatedTournament: tournament, updatedPlayers: players };
+  }
+
   const pointsMap = new Map<string, { points: number; prize: number; wonTitle: boolean }>();
 
+  const totalRounds = getBracketRoundCount(tournament.drawSize);
+  const firstRoundPoints: Record<number, number> = {
+    2: tournament.pointsSemi,
+    3: tournament.pointsQuarter,
+    4: tournament.pointsR16,
+    5: tournament.pointsR32,
+    6: tournament.pointsR64,
+    7: tournament.pointsR128,
+  };
+  const awardByRoundsRemaining: Record<number, { points: number; prizeRate: number }> = {
+    2: { points: tournament.pointsSemi, prizeRate: 0.06 },
+    3: { points: tournament.pointsQuarter, prizeRate: 0.035 },
+    4: { points: tournament.pointsR16, prizeRate: 0.018 },
+    5: { points: tournament.pointsR32, prizeRate: 0.009 },
+    6: { points: tournament.pointsR64, prizeRate: 0.004 },
+    7: { points: tournament.pointsR128, prizeRate: 0.002 },
+  };
+
   tournament.matches.forEach((m) => {
-    if (m.isCompleted && m.player1Id && m.player2Id) {
-      const loserId = m.winnerId === m.player1Id ? m.player2Id : m.player1Id;
-      const isWinner = m.winnerId;
+    if (!m.isCompleted || !m.player1Id || !m.player2Id || !m.winnerId) return;
+    const loserId = m.winnerId === m.player1Id ? m.player2Id : m.player1Id;
+    if (m.round === totalRounds - 1) {
+      pointsMap.set(m.winnerId, {
+        points: tournament.pointsWinner,
+        prize: Math.round(tournament.prizeMoneyPool * 0.22),
+        wonTitle: true,
+      });
+      pointsMap.set(loserId, {
+        points: tournament.pointsFinalist,
+        prize: Math.round(tournament.prizeMoneyPool * 0.12),
+        wonTitle: false,
+      });
+      return;
+    }
 
-      let roundPoints = 0;
-      let roundPrize = 0;
-
-      if (m.roundName === 'Финал') {
-        if (isWinner) {
-          pointsMap.set(isWinner, {
-            points: tournament.pointsWinner,
-            prize: Math.round(tournament.prizeMoneyPool * 0.22),
-            wonTitle: true,
-          });
-        }
-        if (loserId) {
-          pointsMap.set(loserId, {
-            points: tournament.pointsFinalist,
-            prize: Math.round(tournament.prizeMoneyPool * 0.12),
-            wonTitle: false,
-          });
-        }
-      } else if (m.roundName === '1/2 финала' && loserId && !pointsMap.has(loserId)) {
-        roundPoints = tournament.pointsSemi;
-        roundPrize = Math.round(tournament.prizeMoneyPool * 0.06);
-        pointsMap.set(loserId, { points: roundPoints, prize: roundPrize, wonTitle: false });
-      } else if (m.roundName === '1/4 финала' && loserId && !pointsMap.has(loserId)) {
-        roundPoints = tournament.pointsQuarter;
-        roundPrize = Math.round(tournament.prizeMoneyPool * 0.035);
-        pointsMap.set(loserId, { points: roundPoints, prize: roundPrize, wonTitle: false });
-      } else if (m.roundName === '1/8 финала' && loserId && !pointsMap.has(loserId)) {
-        roundPoints = tournament.pointsR16;
-        roundPrize = Math.round(tournament.prizeMoneyPool * 0.018);
-        pointsMap.set(loserId, { points: roundPoints, prize: roundPrize, wonTitle: false });
-      } else if (m.roundName === '1/16 финала' && loserId && !pointsMap.has(loserId)) {
-        roundPoints = tournament.pointsR32;
-        roundPrize = Math.round(tournament.prizeMoneyPool * 0.009);
-        pointsMap.set(loserId, { points: roundPoints, prize: roundPrize, wonTitle: false });
-      } else if (m.roundName === '1/32 финала' && loserId && !pointsMap.has(loserId)) {
-        roundPoints = tournament.pointsR64;
-        roundPrize = Math.round(tournament.prizeMoneyPool * 0.004);
-        pointsMap.set(loserId, { points: roundPoints, prize: roundPrize, wonTitle: false });
-      }
+    if (pointsMap.has(loserId)) return;
+    const award = awardByRoundsRemaining[totalRounds - m.round];
+    if (award) {
+      pointsMap.set(loserId, {
+        points: award.points,
+        prize: Math.round(tournament.prizeMoneyPool * award.prizeRate),
+        wonTitle: false,
+      });
     }
   });
 
@@ -380,7 +505,7 @@ export function finalizeTournamentAndDistributePoints(
         (m) => m.player1Id === p.id || m.player2Id === p.id
       );
       if (playedInTournament) {
-        earnedPoints = tournament.pointsR128 || tournament.pointsR64 || 0;
+        earnedPoints = firstRoundPoints[totalRounds] || 0;
       }
     }
 
@@ -404,7 +529,10 @@ export function finalizeTournamentAndDistributePoints(
     };
   });
 
-  return recalculateRankings(updatedPlayers);
+  return {
+    updatedTournament: { ...tournament, pointsDistributed: true },
+    updatedPlayers: recalculateRankings(updatedPlayers),
+  };
 }
 
 export function recalculateRankings(players: Player[]): Player[] {
@@ -434,7 +562,7 @@ export function simulateEntireTournament(
   let currTournament = JSON.parse(JSON.stringify(tournament)) as Tournament;
   let currPlayers = [...players];
 
-  const totalRounds = Math.log2(currTournament.drawSize);
+  const totalRounds = getBracketRoundCount(currTournament.drawSize);
 
   for (let r = 0; r < totalRounds; r++) {
     const roundMatches = currTournament.matches.filter((m) => m.round === r && !m.isCompleted);
@@ -445,7 +573,8 @@ export function simulateEntireTournament(
 
         if (p1 && p2) {
           const sim = simulateFullMatch(p1, p2, currTournament.surface, currTournament.setsToWin);
-          match.score = sim.score;
+          const currentMatch = currTournament.matches.find((candidate) => candidate.id === match.id);
+          if (currentMatch) currentMatch.score = sim.score;
           const adv = advanceTournamentMatch(currTournament, match.id, sim.winnerId, currPlayers);
           currTournament = adv.updatedTournament;
           currPlayers = adv.updatedPlayers;
@@ -454,6 +583,6 @@ export function simulateEntireTournament(
     }
   }
 
-  currPlayers = finalizeTournamentAndDistributePoints(currTournament, currPlayers);
-  return { completedTournament: currTournament, updatedPlayers: currPlayers };
+  const finalized = finalizeTournamentAndDistributePoints(currTournament, currPlayers);
+  return { completedTournament: finalized.updatedTournament, updatedPlayers: finalized.updatedPlayers };
 }

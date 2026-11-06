@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Eye, Play, Sparkles, Trophy, FastForward, CheckCircle2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Match, Player, Tournament } from '../types';
-import { getRoundName } from '../engine/seasonManager';
+import { getBracketRoundCount, getRoundName } from '../engine/seasonManager';
 
 interface TournamentBracketProps {
   tournament: Tournament;
@@ -30,7 +30,7 @@ export const TournamentBracket: React.FC<TournamentBracketProps> = ({
     return players.find((p) => p.id === id);
   };
 
-  const totalRounds = Math.log2(tournament.drawSize);
+  const totalRounds = getBracketRoundCount(tournament.drawSize);
   const roundsArray = Array.from({ length: totalRounds }, (_, i) => i);
 
   // Trigger celebration confetti when tournament just completed
@@ -174,6 +174,7 @@ export const TournamentBracket: React.FC<TournamentBracketProps> = ({
             const p2 = getPlayer(match.player2Id);
             const isP1Winner = match.isCompleted && match.winnerId === p1?.id;
             const isP2Winner = match.isCompleted && match.winnerId === p2?.id;
+            const isBye = match.isCompleted && !match.score && (!match.player1Id || !match.player2Id);
 
             return (
               <div
@@ -189,7 +190,7 @@ export const TournamentBracket: React.FC<TournamentBracketProps> = ({
                   <span className="font-semibold text-slate-300">{match.roundName}</span>
                   {match.isCompleted ? (
                     <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
-                      Завершен
+                      {isBye ? 'Проход без матча' : 'Завершен'}
                     </span>
                   ) : (
                     <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 text-[10px] font-bold">
@@ -212,7 +213,7 @@ export const TournamentBracket: React.FC<TournamentBracketProps> = ({
                     <span className={`text-xs sm:text-sm font-semibold truncate ${
                       isP1Winner ? 'text-emerald-300 font-bold' : p1 ? 'text-white' : 'text-slate-500'
                     }`}>
-                      {p1?.nameRu || 'Ожидает победителя'}
+                      {p1?.nameRu || (isBye && !match.player1Id ? 'Нет участника' : 'Ожидает победителя')}
                     </span>
                   </div>
 
@@ -247,7 +248,7 @@ export const TournamentBracket: React.FC<TournamentBracketProps> = ({
                     <span className={`text-xs sm:text-sm font-semibold truncate ${
                       isP2Winner ? 'text-emerald-300 font-bold' : p2 ? 'text-white' : 'text-slate-500'
                     }`}>
-                      {p2?.nameRu || 'Ожидает победителя'}
+                      {p2?.nameRu || (isBye && !match.player2Id ? 'Проход без матча' : 'Ожидает победителя')}
                     </span>
                   </div>
 
@@ -289,6 +290,10 @@ export const TournamentBracket: React.FC<TournamentBracketProps> = ({
                         <span>Симуляция</span>
                       </button>
                     </>
+                  ) : isBye ? (
+                    <div className="w-full py-1.5 text-center text-xs text-emerald-400 italic">
+                      Игрок проходит в следующий раунд автоматически
+                    </div>
                   ) : match.isCompleted ? (
                     <button
                       onClick={() => onSelectMatchToWatch(match)}
