@@ -16,8 +16,17 @@ export function initializeNewSeason(players: Player[], year: number = 2026): Sea
   };
 }
 
+export function getBracketCapacity(drawSize: number): number {
+  return Math.max(2, 2 ** Math.ceil(Math.log2(drawSize)));
+}
+
+export function getTournamentRoundCount(drawSize: number): number {
+  return Math.ceil(Math.log2(drawSize));
+}
+
 export function getStandardBracketSeeding(drawSize: number): number[] {
-  const rounds = Math.log2(drawSize);
+  const capacity = getBracketCapacity(drawSize);
+  const rounds = Math.log2(capacity);
   let list = [1, 2];
   for (let r = 1; r < rounds; r++) {
     const nextList: number[] = [];
@@ -33,7 +42,7 @@ export function getStandardBracketSeeding(drawSize: number): number[] {
     }
     list = nextList;
   }
-  // Convert 1-based seed numbers (1..N) to 0-based indices (0..N-1)
+  // Slots for seeds beyond drawSize intentionally remain empty and become byes.
   return list.map((seed) => seed - 1);
 }
 
@@ -47,87 +56,75 @@ export function generateTournamentDraw(
     .sort((a, b) => a.rank - b.rank);
 
   const drawSize = template.drawSize;
-  const numRounds = Math.log2(drawSize);
+  const capacity = getBracketCapacity(drawSize);
+  const numRounds = getTournamentRoundCount(drawSize);
 
-  // Take top ranked players up to drawSize
+  // Place ranked entrants into the standard power-of-two bracket; unused seeds are byes.
   const tournamentPlayers = eligiblePlayers.slice(0, drawSize);
-
-  // Standard Tennis Seeding Placement (Seed 1 at top, Seed 2 at bottom, Seeds 3-4 in opposite halves)
   const seededIndices = getStandardBracketSeeding(drawSize);
-  const seededDraw: Player[] = new Array(drawSize);
-
-  for (let slot = 0; slot < drawSize; slot++) {
-    const playerIdx = seededIndices[slot];
-    seededDraw[slot] = tournamentPlayers[playerIdx] || tournamentPlayers[slot % tournamentPlayers.length];
-  }
-
-  // Generate matches round by round
-  let currentRoundSize = drawSize / 2;
-  const roundMatchesMap: Map<number, Match[]> = new Map();
+  const seededDraw: Array<Player | null> = seededIndices.map((playerIdx) => tournamentPlayers[playerIdx] || null);
+  const roundMatchesMap = new Map<number, Match[]>();
 
   for (let round = 0; round < numRounds; round++) {
+    const matchesInRound = capacity / 2 ** (round + 1);
     const roundMatches: Match[] = [];
-    const isFirstRound = round === 0;
-    const roundName = getRoundName(round, numRounds);
-
-    for (let m = 0; m < currentRoundSize; m++) {
-      const matchId = `${template.id}-r${round}-m${m}`;
-
-      let p1Id: string | null = null;
-      let p2Id: string | null = null;
-      let s1: number | undefined = undefined;
-      let s2: number | undefined = undefined;
-
-      if (isFirstRound) {
-        const p1 = seededDraw[m * 2];
-        const p2 = seededDraw[m * 2 + 1];
-        p1Id = p1 ? p1.id : null;
-        p2Id = p2 ? p2.id : null;
-        if (p1 && p1.rank <= 32) s1 = p1.rank;
-        if (p2 && p2.rank <= 32) s2 = p2.rank;
-      }
-
-      const match: Match = {
-        id: matchId,
+    for (let m = 0; m < matchesInRound; m++) {
+      const isFirstRound = round === 0;
+      const p1 = isFirstRound ? seededDraw[m * 2] : null;
+      const p2 = isFirstRound ? seededDraw[m * 2 + 1] : null;
+      roundMatches.push({
+        id: `${template.id}-r${round}-m${m}`,
         tournamentId: template.id,
         round,
-        roundName,
-        player1Id: p1Id,
-        player2Id: p2Id,
-        seed1: s1,
-        seed2: s2,
+        roundName: getRoundName(round, numRounds),
+        player1Id: p1?.id || null,
+        player2Id: p2?.id || null,
+        seed1: p1 && p1.rank <= 32 ? p1.rank : undefined,
+        seed2: p2 && p2.rank <= 32 ? p2.rank : undefined,
         isCompleted: false,
-      };
-
-      roundMatches.push(match);
+      });
     }
-
     roundMatchesMap.set(round, roundMatches);
-    currentRoundSize /= 2;
   }
 
-  // Link child matches to next match IDs
+  // Connect each match to its parent match in the following round.
   for (let round = 0; round < numRounds - 1; round++) {
     const currMatches = roundMatchesMap.get(round)!;
     const nextMatches = roundMatchesMap.get(round + 1)!;
+    currMatches.forEach((match, index) => {
+      match.nextMatchId = nextMatches[Math.floor(index / 2)].id;
+      match.nextMatchSlot = index % 2 === 0 ? 1 : 2;
+    });
+  }
 
-    for (let i = 0; i < currMatches.length; i++) {
-      const targetNextMatch = nextMatches[Math.floor(i / 2)];
-      currMatches[i].nextMatchId = targetNextMatch.id;
-      currMatches[i].nextMatchSlot = (i % 2 === 0 ? 1 : 2);
+  // Resolve byes before play begins and feed those players into the next round.
+  for (let round = 0; round < numRounds; round++) {
+    for (const match of roundMatchesMap.get(round)!) {
+      const onlyPlayer = match.player1Id || match.player2Id;
+      if (!match.player1Id !== !match.player2Id && onlyPlayer) {
+        match.isCompleted = true;
+        match.winnerId = onlyPlayer;
+        if (match.nextMatchId) {
+          const nextMatch = roundMatchesMap.get(round + 1)?.find((candidate) => candidate.id === match.nextMatchId);
+          if (nextMatch) {
+            if (match.nextMatchSlot === 1) nextMatch.player1Id = onlyPlayer;
+            else nextMatch.player2Id = onlyPlayer;
+          }
+        }
+      }
     }
   }
 
-  const allMatchesList: Match[] = [];
-  for (let r = 0; r < numRounds; r++) {
-    allMatchesList.push(...roundMatchesMap.get(r)!);
-  }
+  const allMatchesList = Array.from(roundMatchesMap.values()).flat();
+  const finalMatch = roundMatchesMap.get(numRounds - 1)?.[0];
+  const isCompleted = Boolean(finalMatch?.isCompleted && finalMatch.winnerId);
 
   return {
     ...template,
     matches: allMatchesList,
-    isCompleted: false,
+    isCompleted,
     currentRound: 0,
+    championId: isCompleted ? finalMatch?.winnerId : undefined,
   };
 }
 
