@@ -59,6 +59,8 @@ export interface MatchDetailedStats {
   firstServePercentage: [number, number];
   firstServePointsWon: [number, number];
   secondServePointsWon: [number, number];
+  firstServesAttempted?: [number, number];
+  firstServesIn?: [number, number];
   breakPointsConverted: [number, number];
   breakPointsTotal: [number, number];
   winners: [number, number];

@@ -10,6 +10,29 @@ export interface PointSimulationResult {
   isSetWon: boolean;
   isMatchWon: boolean;
   server: 1 | 2;
+  firstServeIn: boolean;
+  serveNumber: 1 | 2;
+}
+
+export function recordServeStats(stats: MatchDetailedStats, point: PointSimulationResult): void {
+  const serverIndex = point.server - 1;
+  const attempts = [...(stats.firstServesAttempted ?? [0, 0])] as [number, number];
+  const firstServesIn = [...(stats.firstServesIn ?? [0, 0])] as [number, number];
+  const firstServePointsWon = [...stats.firstServePointsWon] as [number, number];
+  const secondServePointsWon = [...stats.secondServePointsWon] as [number, number];
+
+  attempts[serverIndex]++;
+  if (point.firstServeIn) firstServesIn[serverIndex]++;
+  stats.firstServesAttempted = attempts;
+  stats.firstServesIn = firstServesIn;
+  stats.firstServePercentage[serverIndex] = Math.round((firstServesIn[serverIndex] / attempts[serverIndex]) * 100);
+
+  if (point.winner === point.server) {
+    if (point.serveNumber === 1) firstServePointsWon[serverIndex]++;
+    else secondServePointsWon[serverIndex]++;
+  }
+  stats.firstServePointsWon = firstServePointsWon;
+  stats.secondServePointsWon = secondServePointsWon;
 }
 
 export function calculateSurfaceRating(player: Player, surface: SurfaceType): number {
@@ -53,15 +76,23 @@ export function simulateSinglePoint(
   const serverClutch = isPressure ? (servingPlayer.stats.clutch / 100) : 1.0;
   const receiverClutch = isPressure ? (receivingPlayer.stats.clutch / 100) : 1.0;
 
-  // Serve power & Ace probability
+  // Each point starts with a first serve. A fault gives the server one second-serve attempt.
+  const firstServeInChance = Math.min(0.78, Math.max(
+    0.52,
+    0.62 + (servingPlayer.stats.serve - 75) * 0.0015 + (servingPlayer.stats.mental - 75) * 0.0008
+  ));
+  const firstServeIn = Math.random() < firstServeInChance;
+  const serveNumber: 1 | 2 = firstServeIn ? 1 : 2;
+  const secondServeInChance = Math.min(0.97, Math.max(
+    0.82,
+    0.90 + (servingPlayer.stats.serve - 75) * 0.0005 + (servingPlayer.stats.mental - 75) * 0.001
+  ));
+  const secondServeIn = firstServeIn || Math.random() < secondServeInChance;
+  const firstFaultPrefix = firstServeIn ? '' : 'Первая подача не попала. Второй мяч: ';
   const surfaceSpeed = surface === 'Grass' ? 1.25 : surface === 'Indoor Hard' ? 1.15 : surface === 'Hard' ? 1.05 : 0.85;
-  const aceChance = ((servingPlayer.stats.serve - 60) / 300) * surfaceSpeed * 0.45;
-  const dfChance = Math.max(0.015, (100 - servingPlayer.stats.mental) / 2000);
 
-  const roll = Math.random();
-
-  // 1. Double Fault
-  if (roll < dfChance) {
+  // A missed second serve awards the point to the receiver.
+  if (!secondServeIn) {
     const pointWinner = server === 1 ? 2 : 1;
     return {
       winner: pointWinner,
@@ -73,18 +104,20 @@ export function simulateSinglePoint(
       isSetWon: false,
       isMatchWon: false,
       server,
+      firstServeIn,
+      serveNumber,
     };
   }
 
-  // 2. Ace
-  if (roll < dfChance + aceChance) {
-    const pointWinner = server;
+  // First serves are more aggressive; second serves trade pace for reliability.
+  const aceChance = ((servingPlayer.stats.serve - 60) / 300) * surfaceSpeed * 0.45 * (serveNumber === 1 ? 1 : 0.35);
+  if (Math.random() < aceChance) {
     const speed = Math.round(180 + (servingPlayer.stats.serve - 50) * 1.1 + Math.random() * 15);
     return {
-      winner: pointWinner,
+      winner: server,
       outcomeType: 'ace',
       rallyLength: 1,
-      descriptionRu: `Эйс навылет (${speed} км/ч) от ${servingPlayer.nameRu}!`,
+      descriptionRu: `${firstFaultPrefix}Эйс навылет (${speed} км/ч) от ${servingPlayer.nameRu}!`,
       ballPath: [
         { x: 50, y: server === 1 ? 90 : 10 },
         { x: Math.random() > 0.5 ? 25 : 75, y: server === 1 ? 25 : 75 },
@@ -93,12 +126,14 @@ export function simulateSinglePoint(
       isSetWon: false,
       isMatchWon: false,
       server,
+      firstServeIn,
+      serveNumber,
     };
   }
 
-  // 3. Rally simulation
+  // Rally simulation
   const rallyLength = Math.floor(2 + Math.random() * (surface === 'Clay' ? 9 : 5));
-  const serverAdvantage = 1.12 * (servingPlayer.stats.serve / 85);
+  const serverAdvantage = 1.12 * (servingPlayer.stats.serve / 85) * (serveNumber === 1 ? 1 : 0.88);
   const adjustedServerPower = serverEffRating * serverClutch * serverAdvantage;
   const adjustedReceiverPower = receiverEffRating * receiverClutch;
 
@@ -114,12 +149,12 @@ export function simulateSinglePoint(
   if (outcomeType === 'winner') {
     const shots = ['мощный форхенд по линии', 'косой кросс с бэкхенда', 'точный укороченный под сетку', 'смэш у сетки'];
     const chosenShot = shots[Math.floor(Math.random() * shots.length)];
-    desc = `Виннер! ${winnerPlayer.nameRu} пробивает ${chosenShot} (розыгрыш ${rallyLength} уд.)`;
+    desc = `${firstFaultPrefix}Виннер! ${winnerPlayer.nameRu} пробивает ${chosenShot} (розыгрыш ${rallyLength} уд.)`;
   } else if (outcomeType === 'unforced_error') {
     const loser = pointWinner === 1 ? player2 : player1;
-    desc = `Невынужденная ошибка: ${loser.nameRu} посылает мяч в сетку или аут (${rallyLength} уд.)`;
+    desc = `${firstFaultPrefix}Невынужденная ошибка: ${loser.nameRu} посылает мяч в сетку или аут (${rallyLength} уд.)`;
   } else {
-    desc = `Вынужденная ошибка после агрессивной атаки от ${winnerPlayer.nameRu}`;
+    desc = `${firstFaultPrefix}Вынужденная ошибка после агрессивной атаки от ${winnerPlayer.nameRu}`;
   }
 
   // Visual ball trail coordinates
@@ -139,6 +174,8 @@ export function simulateSinglePoint(
     isSetWon: false,
     isMatchWon: false,
     server,
+    firstServeIn,
+    serveNumber,
   };
 }
 
@@ -167,9 +204,11 @@ export function simulateFullMatch(
   const stats: MatchDetailedStats = {
     aces: [0, 0],
     doubleFaults: [0, 0],
-    firstServePercentage: [62 + Math.floor(Math.random() * 12), 62 + Math.floor(Math.random() * 12)],
+    firstServePercentage: [0, 0],
     firstServePointsWon: [0, 0],
     secondServePointsWon: [0, 0],
+    firstServesAttempted: [0, 0],
+    firstServesIn: [0, 0],
     breakPointsConverted: [0, 0],
     breakPointsTotal: [0, 0],
     winners: [0, 0],
@@ -216,6 +255,7 @@ export function simulateFullMatch(
             p2Tb++;
             stats.totalPointsWon[1]++;
           }
+          recordServeStats(stats, pt);
           if (pt.outcomeType === 'ace') stats.aces[pt.winner - 1]++;
           if (pt.outcomeType === 'double_fault') stats.doubleFaults[pt.winner === 1 ? 1 : 0]++;
           if (pt.outcomeType === 'winner') stats.winners[pt.winner - 1]++;
@@ -253,6 +293,7 @@ export function simulateFullMatch(
           p2Points++;
           stats.totalPointsWon[1]++;
         }
+        recordServeStats(stats, pt);
 
         if (pt.outcomeType === 'ace') stats.aces[pt.winner - 1]++;
         if (pt.outcomeType === 'double_fault') stats.doubleFaults[pt.winner === 1 ? 1 : 0]++;

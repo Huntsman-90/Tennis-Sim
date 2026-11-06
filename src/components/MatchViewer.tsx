@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Play, Pause, FastForward, RotateCcw, Volume2, VolumeX, CheckCircle, ArrowLeft } from 'lucide-react';
 import { Match, MatchDetailedStats, MatchScore, Player, SurfaceType } from '../types';
-import { formatGameScore, simulateSinglePoint } from '../engine/tennisEngine';
+import { formatGameScore, recordServeStats, simulateSinglePoint } from '../engine/tennisEngine';
 import { soundFx } from '../utils/audio';
 
 interface MatchViewerProps {
@@ -48,9 +48,11 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
     match.score?.stats || {
       aces: [0, 0],
       doubleFaults: [0, 0],
-      firstServePercentage: [65, 63],
+      firstServePercentage: [0, 0],
       firstServePointsWon: [0, 0],
       secondServePointsWon: [0, 0],
+      firstServesAttempted: [0, 0],
+      firstServesIn: [0, 0],
       breakPointsConverted: [0, 0],
       breakPointsTotal: [0, 0],
       winners: [0, 0],
@@ -114,6 +116,7 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
     if (ptResult.outcomeType === 'double_fault') updatedStats.doubleFaults[ptResult.winner === 1 ? 1 : 0]++;
     if (ptResult.outcomeType === 'winner') updatedStats.winners[ptResult.winner - 1]++;
     if (ptResult.outcomeType === 'unforced_error') updatedStats.unforcedErrors[ptResult.winner === 1 ? 1 : 0]++;
+    recordServeStats(updatedStats, ptResult);
     setStats(updatedStats);
 
     // Add log
@@ -527,6 +530,9 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
           {[
             { label: 'Эйсы', v1: stats.aces[0], v2: stats.aces[1] },
             { label: 'Двойные ошибки', v1: stats.doubleFaults[0], v2: stats.doubleFaults[1] },
+            { label: 'Первая подача', v1: `${stats.firstServePercentage[0]}%`, v2: `${stats.firstServePercentage[1]}%` },
+            { label: 'Очки на первой подаче', v1: stats.firstServePointsWon[0], v2: stats.firstServePointsWon[1] },
+            { label: 'Очки на второй подаче', v1: stats.secondServePointsWon[0], v2: stats.secondServePointsWon[1] },
             { label: 'Виннеры (активные очки)', v1: stats.winners[0], v2: stats.winners[1] },
             { label: 'Невынужденные ошибки', v1: stats.unforcedErrors[0], v2: stats.unforcedErrors[1] },
             { label: 'Макс. скорость подачи', v1: `${stats.fastestServeKmH[0]} км/ч`, v2: `${stats.fastestServeKmH[1]} км/ч` },
