@@ -40,8 +40,6 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
   const [isAutoPlaying, setIsAutoPlaying] = useState<boolean>(false);
   const [autoPlaySpeed, setAutoPlaySpeed] = useState<number>(800); // ms per point
   const [isMuted, setIsMuted] = useState<boolean>(soundFx.getMuted());
-  const [ballPos, setBallPos] = useState<{ x: number; y: number }>({ x: 50, y: 50 });
-  const [isBallActive, setIsBallActive] = useState<boolean>(false);
 
   // Match stats
   const [stats, setStats] = useState<MatchDetailedStats>(
@@ -100,10 +98,6 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
     } else {
       soundFx.playRacketHit(ptResult.outcomeType === 'winner');
     }
-
-    // Visual Ball Animation
-    setIsBallActive(true);
-    setBallPos(ptResult.ballPath[ptResult.ballPath.length - 1]);
 
     // Update Stats
     const updatedStats = { ...stats };
@@ -378,45 +372,6 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
               )}
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* 2.5D Tennis Court Simulation View */}
-      <div className="relative w-full aspect-[16/9] sm:aspect-[21/9] bg-gradient-to-b from-blue-900/60 via-emerald-950/40 to-blue-950/80 rounded-3xl border-2 border-emerald-500/30 overflow-hidden shadow-2xl flex items-center justify-center p-4">
-        {/* Court markings */}
-        <div className="w-[85%] h-[80%] border-2 border-white/60 relative bg-emerald-700/30 backdrop-blur-xs">
-          {/* Net */}
-          <div className="absolute top-1/2 left-0 right-0 h-1 bg-white/90 shadow-md shadow-black flex items-center justify-center">
-            <div className="w-full h-2 border-b border-dashed border-white/40" />
-          </div>
-
-          {/* Service Lines */}
-          <div className="absolute top-[25%] left-0 right-0 h-0.5 bg-white/50" />
-          <div className="absolute top-[75%] left-0 right-0 h-0.5 bg-white/50" />
-          <div className="absolute top-[25%] bottom-[25%] left-1/2 w-0.5 bg-white/50" />
-
-          {/* Player avatars on court */}
-          <div className="absolute top-[8%] left-1/2 -translate-x-1/2 flex flex-col items-center">
-            <div className="text-xl sm:text-2xl drop-shadow-md">🧍‍♂️</div>
-            <span className="text-[10px] font-bold bg-slate-950/80 px-2 py-0.5 rounded text-white border border-slate-700">
-              {player2.nameRu.split(' ')[1] || player2.nameRu}
-            </span>
-          </div>
-
-          <div className="absolute bottom-[8%] left-1/2 -translate-x-1/2 flex flex-col items-center">
-            <span className="text-[10px] font-bold bg-slate-950/80 px-2 py-0.5 rounded text-white border border-slate-700">
-              {player1.nameRu.split(' ')[1] || player1.nameRu}
-            </span>
-            <div className="text-xl sm:text-2xl drop-shadow-md">🧍‍♂️</div>
-          </div>
-
-          {/* Animated Tennis Ball */}
-          {isBallActive && (
-            <div
-              className="absolute w-3.5 h-3.5 rounded-full bg-lime-300 shadow-lg shadow-lime-400 border border-lime-100 transition-all duration-300 pointer-events-none -translate-x-1/2 -translate-y-1/2 animate-pulse"
-              style={{ left: `${ballPos.x}%`, top: `${ballPos.y}%` }}
-            />
-          )}
         </div>
       </div>
 

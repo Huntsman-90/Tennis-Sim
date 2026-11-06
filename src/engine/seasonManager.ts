@@ -1,20 +1,18 @@
 import { INITIAL_TOURNAMENTS_SCHEDULE } from '../data/tournaments';
-import { Match, Player, SeasonState, Tournament, TourType } from '../types';
+import { Match, Player, SeasonState, Tournament, TourType, TournamentCategory } from '../types';
 import { simulateFullMatch } from './tennisEngine';
 
-export function initializeNewSeason(players: Player[], year: number = 2026): SeasonState {
-  const tournaments: Tournament[] = INITIAL_TOURNAMENTS_SCHEDULE.map((t, idx) => {
-    return generateTournamentDraw(t, players, idx === 0);
-  });
-
-  return {
-    year,
-    currentTournamentIndex: 0,
-    tournaments,
-    completedTournaments: [],
-    history: [],
-  };
+export function getTournamentTier(category: TournamentCategory): number {
+  if (category === 'Grand Slam' || category === 'ATP Finals' || category === 'WTA Finals') return 1;
+  if (category === 'Masters 1000' || category === 'WTA 1000') return 2;
+  if (category === 'ATP 500' || category === 'WTA 500') return 3;
+  if (category === 'ATP 250' || category === 'WTA 250') return 4;
+  if (category === 'W100' || category === 'W75') return 5;
+  if (category === 'W50' || category === 'M25') return 6;
+  if (category === 'W35') return 7;
+  return 8; // M15, W15
 }
+
 
 export function getStandardBracketSeeding(drawSize: number): number[] {
   const rounds = Math.log2(drawSize);
@@ -37,31 +35,46 @@ export function getStandardBracketSeeding(drawSize: number): number[] {
   return list.map((seed) => seed - 1);
 }
 
-export function generateTournamentDraw(
+export function generateTournamentDrawWithPlayers(
   template: Omit<Tournament, 'matches' | 'isCompleted' | 'currentRound' | 'championId' | 'runnerUpId'>,
+  tournamentPlayers: Player[],
   allPlayers: Player[],
-  _isFirst: boolean = false
+  excludedIds?: Set<string>
 ): Tournament {
-  const eligiblePlayers = allPlayers
-    .filter((p) => p.tour === template.tour && !p.retired)
-    .sort((a, b) => a.rank - b.rank);
-
   const drawSize = template.drawSize;
   const numRounds = Math.log2(drawSize);
 
-  // Take top ranked players up to drawSize
-  const tournamentPlayers = eligiblePlayers.slice(0, drawSize);
+  // Pad tournamentPlayers if fewer than drawSize
+  const filledPlayers = [...tournamentPlayers];
+  if (filledPlayers.length < drawSize) {
+    const assignedIds = new Set(filledPlayers.map((p) => p.id));
+    if (excludedIds) {
+      excludedIds.forEach((id) => assignedIds.add(id));
+    }
+    const backups = allPlayers
+      .filter((p) => p.tour === template.tour && !p.retired && !assignedIds.has(p.id))
+      .sort((a, b) => a.rank - b.rank);
+    for (let i = 0; i < backups.length && filledPlayers.length < drawSize; i++) {
+      filledPlayers.push(backups[i]);
+      assignedIds.add(backups[i].id);
+      if (excludedIds) excludedIds.add(backups[i].id);
+    }
+  }
 
-  // Standard Tennis Seeding Placement (Seed 1 at top, Seed 2 at bottom, Seeds 3-4 in opposite halves)
+  // Sort tournament players by rank so index 0 is top seed
+  filledPlayers.sort((a, b) => a.rank - b.rank);
+
+  // Standard Tennis Seeding Placement (Seed 1 top, Seed 2 bottom, etc.)
   const seededIndices = getStandardBracketSeeding(drawSize);
   const seededDraw: Player[] = new Array(drawSize);
 
   for (let slot = 0; slot < drawSize; slot++) {
     const playerIdx = seededIndices[slot];
-    seededDraw[slot] = tournamentPlayers[playerIdx] || tournamentPlayers[slot % tournamentPlayers.length];
+    seededDraw[slot] = filledPlayers[playerIdx] || filledPlayers[slot % filledPlayers.length];
   }
 
-  // Generate matches round by round
+  const maxSeeds = drawSize >= 64 ? 32 : drawSize >= 32 ? 16 : 8;
+
   let currentRoundSize = drawSize / 2;
   const roundMatchesMap: Map<number, Match[]> = new Map();
 
@@ -83,8 +96,14 @@ export function generateTournamentDraw(
         const p2 = seededDraw[m * 2 + 1];
         p1Id = p1 ? p1.id : null;
         p2Id = p2 ? p2.id : null;
-        if (p1 && p1.rank <= 32) s1 = p1.rank;
-        if (p2 && p2.rank <= 32) s2 = p2.rank;
+        if (p1) {
+          const sIndex = filledPlayers.findIndex((p) => p.id === p1.id);
+          if (sIndex >= 0 && sIndex < maxSeeds) s1 = sIndex + 1;
+        }
+        if (p2) {
+          const sIndex = filledPlayers.findIndex((p) => p.id === p2.id);
+          if (sIndex >= 0 && sIndex < maxSeeds) s2 = sIndex + 1;
+        }
       }
 
       const match: Match = {
@@ -128,7 +147,258 @@ export function generateTournamentDraw(
     matches: allMatchesList,
     isCompleted: false,
     currentRound: 0,
+    isDrawn: true,
   };
+}
+
+export function generateTournamentsForWeek(
+  weekTemplates: Omit<Tournament, 'matches' | 'isCompleted' | 'currentRound' | 'championId' | 'runnerUpId'>[],
+  allPlayers: Player[]
+): Tournament[] {
+  const tourMap = new Map<TourType, typeof weekTemplates>();
+  weekTemplates.forEach((t) => {
+    if (!tourMap.has(t.tour)) tourMap.set(t.tour, []);
+    tourMap.get(t.tour)!.push(t);
+  });
+
+  const generatedTournaments: Tournament[] = [];
+
+  tourMap.forEach((groupTemplates, tour) => {
+    const eligible = allPlayers
+      .filter((p) => p.tour === tour && !p.retired)
+      .sort((a, b) => a.rank - b.rank);
+
+    let availablePlayers = [...eligible];
+    const weekAssignedIds = new Set<string>();
+
+    const sortedGroup = [...groupTemplates].sort((a, b) => {
+      return getTournamentTier(a.category) - getTournamentTier(b.category);
+    });
+
+    const tierGroups = new Map<number, typeof sortedGroup>();
+    sortedGroup.forEach((t) => {
+      const tier = getTournamentTier(t.category);
+      if (!tierGroups.has(tier)) tierGroups.set(tier, []);
+      tierGroups.get(tier)!.push(t);
+    });
+
+    const sortedTiers = Array.from(tierGroups.keys()).sort((a, b) => a - b);
+
+    sortedTiers.forEach((tier) => {
+      const tList = tierGroups.get(tier)!;
+      if (tList.length === 1) {
+        const t = tList[0];
+        const assigned = availablePlayers.slice(0, t.drawSize);
+        availablePlayers = availablePlayers.slice(t.drawSize);
+        assigned.forEach((p) => weekAssignedIds.add(p.id));
+        generatedTournaments.push(generateTournamentDrawWithPlayers(t, assigned, allPlayers, weekAssignedIds));
+      } else {
+        const k = tList.length;
+        const totalNeeded = tList.reduce((sum, t) => sum + t.drawSize, 0);
+        const tierPlayers = availablePlayers.slice(0, totalNeeded);
+        availablePlayers = availablePlayers.slice(totalNeeded);
+        tierPlayers.forEach((p) => weekAssignedIds.add(p.id));
+
+        const buckets: Player[][] = Array.from({ length: k }, () => []);
+        const capacities = tList.map((t) => t.drawSize);
+
+        for (let i = 0; i < tierPlayers.length; i++) {
+          const player = tierPlayers[i];
+          const round = Math.floor(i / k);
+          const pos = i % k;
+          const primaryBucketIdx = (round % 2 === 0) ? pos : (k - 1 - pos);
+
+          if (buckets[primaryBucketIdx].length < capacities[primaryBucketIdx]) {
+            buckets[primaryBucketIdx].push(player);
+          } else {
+            const altIdx = buckets.findIndex((b, idx) => b.length < capacities[idx]);
+            if (altIdx >= 0) buckets[altIdx].push(player);
+          }
+        }
+
+        tList.forEach((t, idx) => {
+          generatedTournaments.push(generateTournamentDrawWithPlayers(t, buckets[idx], allPlayers, weekAssignedIds));
+        });
+      }
+    });
+  });
+
+  const templateOrder = new Map<string, number>();
+  weekTemplates.forEach((t, idx) => templateOrder.set(t.id, idx));
+
+  generatedTournaments.sort((a, b) => {
+    return (templateOrder.get(a.id) ?? 0) - (templateOrder.get(b.id) ?? 0);
+  });
+
+  return generatedTournaments;
+}
+
+export function createSeasonTournaments(
+  templates: Omit<Tournament, 'matches' | 'isCompleted' | 'currentRound' | 'championId' | 'runnerUpId'>[],
+  allPlayers: Player[],
+  initialWeek: number = 1
+): Tournament[] {
+  const week1Templates = templates.filter((t) => t.week === initialWeek);
+  const week1Drawn = generateTournamentsForWeek(week1Templates, allPlayers);
+  const week1Map = new Map<string, Tournament>();
+  week1Drawn.forEach((t) => week1Map.set(t.id, t));
+
+  return templates.map((template) => {
+    if (template.week === initialWeek && week1Map.has(template.id)) {
+      return week1Map.get(template.id)!;
+    }
+    return {
+      ...template,
+      matches: [],
+      isCompleted: false,
+      currentRound: 0,
+      isDrawn: false,
+    };
+  });
+}
+
+export function drawTournamentsForWeek(
+  tournaments: Tournament[],
+  targetWeek: number,
+  allPlayers: Player[]
+): Tournament[] {
+  const weekTournaments = tournaments.filter((t) => t.week === targetWeek);
+  if (weekTournaments.length === 0) return tournaments;
+
+  const alreadyDrawn = weekTournaments.every((t) => t.isDrawn && t.matches.length > 0);
+  if (alreadyDrawn) return tournaments;
+
+  const templatesForWeek = INITIAL_TOURNAMENTS_SCHEDULE.filter((t) => t.week === targetWeek);
+  const drawn = generateTournamentsForWeek(templatesForWeek, allPlayers);
+  const drawnMap = new Map<string, Tournament>();
+  drawn.forEach((t) => drawnMap.set(t.id, t));
+
+  return tournaments.map((t) => {
+    if (t.week === targetWeek && drawnMap.has(t.id)) {
+      return drawnMap.get(t.id)!;
+    }
+    return t;
+  });
+}
+
+export function getCurrentActiveWeek(tournaments: Tournament[]): number {
+  const uncompleted = tournaments.find((t) => !t.isCompleted);
+  return uncompleted ? uncompleted.week : 46;
+}
+
+export function getProjectedSeedsForTournament(
+  template: Tournament,
+  allPlayers: Player[]
+): { topSeeds: Player[]; cutoffRank: number } {
+  if (!template) {
+    return { topSeeds: [], cutoffRank: 100 };
+  }
+
+  const eligible = allPlayers
+    .filter((p) => p.tour === template.tour && !p.retired)
+    .sort((a, b) => a.rank - b.rank);
+
+  const weekTemplates = INITIAL_TOURNAMENTS_SCHEDULE.filter(
+    (t) => t.week === template.week && t.tour === template.tour
+  );
+
+  const higherTiers = weekTemplates.filter(
+    (t) => getTournamentTier(t.category) < getTournamentTier(template.category)
+  );
+  const higherTierCapacity = higherTiers.reduce((sum, t) => sum + t.drawSize, 0);
+
+  const sameTier = weekTemplates.filter(
+    (t) => getTournamentTier(t.category) === getTournamentTier(template.category)
+  );
+
+  const pool = eligible.slice(higherTierCapacity);
+  const maxSeeds = template.drawSize >= 64 ? 32 : template.drawSize >= 32 ? 16 : 8;
+
+  let projectedTopSeeds: Player[] = [];
+  if (sameTier.length > 1) {
+    projectedTopSeeds = pool.filter((_, idx) => idx % sameTier.length === 0).slice(0, maxSeeds);
+  } else {
+    projectedTopSeeds = pool.slice(0, maxSeeds);
+  }
+
+  const cutoff = pool[template.drawSize - 1]?.rank || (higherTierCapacity + template.drawSize);
+
+  return {
+    topSeeds: projectedTopSeeds,
+    cutoffRank: cutoff,
+  };
+}
+
+export function simulateSeasonUpToWeek(
+  season: SeasonState,
+  players: Player[],
+  targetWeek: number
+): { updatedSeason: SeasonState; updatedPlayers: Player[] } {
+  let currTournaments = [...season.tournaments];
+  let currPlayers = [...players];
+
+  const allWeeks = [...new Set(currTournaments.map((t) => t.week))].sort((a, b) => a - b);
+
+  for (const week of allWeeks) {
+    if (week >= targetWeek) break;
+
+    // Ensure week is drawn
+    currTournaments = drawTournamentsForWeek(currTournaments, week, currPlayers);
+
+    // Simulate all uncompleted tournaments of this week
+    for (let i = 0; i < currTournaments.length; i++) {
+      const tourn = currTournaments[i];
+      if (tourn.week === week && !tourn.isCompleted) {
+        const { completedTournament, updatedPlayers } = simulateEntireTournament(tourn, currPlayers);
+        currTournaments[i] = completedTournament;
+        currPlayers = finalizeTournamentAndDistributePoints(completedTournament, updatedPlayers);
+      }
+    }
+  }
+
+  // Draw the target week tournaments with the newly earned rankings
+  currTournaments = drawTournamentsForWeek(currTournaments, targetWeek, currPlayers);
+
+  // Find the first tournament index of targetWeek
+  const targetIdx = currTournaments.findIndex((t) => t.week === targetWeek);
+
+  const updatedSeason: SeasonState = {
+    ...season,
+    currentTournamentIndex: targetIdx >= 0 ? targetIdx : season.currentTournamentIndex,
+    tournaments: currTournaments,
+  };
+
+  return { updatedSeason, updatedPlayers: currPlayers };
+}
+
+export function generateSeasonTournaments(
+  templates: Omit<Tournament, 'matches' | 'isCompleted' | 'currentRound' | 'championId' | 'runnerUpId'>[],
+  allPlayers: Player[]
+): Tournament[] {
+  return createSeasonTournaments(templates, allPlayers, 1);
+}
+
+export function initializeNewSeason(players: Player[], year: number = 2026): SeasonState {
+  const tournaments = createSeasonTournaments(INITIAL_TOURNAMENTS_SCHEDULE, players, 1);
+
+  return {
+    year,
+    currentTournamentIndex: 0,
+    tournaments,
+    completedTournaments: [],
+    history: [],
+  };
+}
+
+export function generateTournamentDraw(
+  template: Omit<Tournament, 'matches' | 'isCompleted' | 'currentRound' | 'championId' | 'runnerUpId'>,
+  allPlayers: Player[],
+  _isFirst: boolean = false
+): Tournament {
+  const eligible = allPlayers
+    .filter((p) => p.tour === template.tour && !p.retired)
+    .sort((a, b) => a.rank - b.rank);
+  return generateTournamentDrawWithPlayers(template, eligible.slice(0, template.drawSize), allPlayers);
 }
 
 export function repairTournamentBracket(tournament: Tournament, allPlayers: Player[]): Tournament {
@@ -217,16 +487,59 @@ export function repairTournamentBracket(tournament: Tournament, allPlayers: Play
 }
 
 export function repairSeasonState(season: SeasonState, allPlayers: Player[]): SeasonState {
+  if (!season.tournaments || season.tournaments.length !== INITIAL_TOURNAMENTS_SCHEDULE.length) {
+    const cleanTournaments = createSeasonTournaments(INITIAL_TOURNAMENTS_SCHEDULE, allPlayers, 1);
+    return {
+      ...season,
+      currentTournamentIndex: 0,
+      tournaments: cleanTournaments,
+    };
+  }
+
+  const activeWeek = getCurrentActiveWeek(season.tournaments);
+
   const existingMap = new Map<string, Tournament>();
   season.tournaments.forEach((t) => existingMap.set(t.id, t));
 
-  const updatedTournaments: Tournament[] = INITIAL_TOURNAMENTS_SCHEDULE.map((template) => {
-    if (existingMap.has(template.id)) {
-      return repairTournamentBracket(existingMap.get(template.id)!, allPlayers);
-    } else {
-      return generateTournamentDraw(template, allPlayers, false);
+  let updatedTournaments: Tournament[] = INITIAL_TOURNAMENTS_SCHEDULE.map((template) => {
+    const existing = existingMap.get(template.id);
+    if (!existing) {
+      return {
+        ...template,
+        matches: [],
+        isCompleted: false,
+        currentRound: 0,
+        isDrawn: false,
+      };
     }
+
+    if (existing.week > activeWeek) {
+      // Future week: Keep undrawn so it generates dynamically when reached!
+      return {
+        ...template,
+        matches: [],
+        isCompleted: false,
+        currentRound: 0,
+        isDrawn: false,
+      };
+    }
+
+    // Past or current week: repair if matches exist
+    if (existing.matches && existing.matches.length > 0) {
+      return {
+        ...repairTournamentBracket(existing, allPlayers),
+        isDrawn: true,
+      };
+    }
+
+    return {
+      ...existing,
+      isDrawn: false,
+    };
   });
+
+  // Ensure current active week is drawn
+  updatedTournaments = drawTournamentsForWeek(updatedTournaments, activeWeek, allPlayers);
 
   return {
     ...season,

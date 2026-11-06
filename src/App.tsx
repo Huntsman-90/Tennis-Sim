@@ -13,10 +13,13 @@ import { Match, MatchScore, Player, SaveSlot, SeasonState } from './types';
 import { getInitialPlayers } from './data/players';
 import {
   advanceTournamentMatch,
+  drawTournamentsForWeek,
   finalizeTournamentAndDistributePoints,
+  getCurrentActiveWeek,
   initializeNewSeason,
   repairSeasonState,
   simulateEntireTournament,
+  simulateSeasonUpToWeek,
 } from './engine/seasonManager';
 import { simulateFullMatch } from './engine/tennisEngine';
 import {
@@ -32,17 +35,18 @@ import {
 export function App() {
   const [players, setPlayers] = useState<Player[]>(() => {
     const saved = loadAutoSave();
-    if (saved && saved.players && saved.players.length > 0) {
+    if (saved && saved.players && saved.players.length >= 300) {
       return saved.players;
     }
     return getInitialPlayers();
   });
 
   const [season, setSeason] = useState<SeasonState>(() => {
+    const initPlayers = getInitialPlayers();
     const saved = loadAutoSave();
-    const initPlayers = (saved && saved.players && saved.players.length > 0) ? saved.players : getInitialPlayers();
-    if (saved && saved.season && saved.season.tournaments?.length > 0) {
-      return repairSeasonState(saved.season, initPlayers);
+    if (saved && saved.season && saved.season.tournaments?.length >= 200) {
+      const activePlayers = (saved.players && saved.players.length >= 300) ? saved.players : initPlayers;
+      return repairSeasonState(saved.season, activePlayers);
     }
     return initializeNewSeason(initPlayers, 2026);
   });
@@ -89,6 +93,7 @@ export function App() {
   };
 
   const currentTournament = season.tournaments[season.currentTournamentIndex] || season.tournaments[0];
+  const currentActiveWeek = getCurrentActiveWeek(season.tournaments);
 
   // Match finished in interactive MatchViewer
   const handleMatchFinishedFromViewer = (matchId: string, winnerId: string, score: MatchScore) => {
@@ -224,18 +229,43 @@ export function App() {
 
   // Next tournament in calendar
   const handleNextTournament = () => {
+    let currTournaments = [...season.tournaments];
+    let currPlayers = [...players];
     const nextIdx = season.currentTournamentIndex + 1;
-    if (nextIdx < season.tournaments.length) {
-      setSeason({
+
+    if (nextIdx < currTournaments.length) {
+      const nextTourn = currTournaments[nextIdx];
+
+      // If moving to a tournament in a week that is not drawn yet
+      if (!nextTourn.isDrawn || !nextTourn.matches || nextTourn.matches.length === 0) {
+        // Finalize any uncompleted tournaments of previous weeks so rankings are up to date
+        for (let i = 0; i < currTournaments.length; i++) {
+          const t = currTournaments[i];
+          if (t.week < nextTourn.week && !t.isCompleted) {
+            const { completedTournament, updatedPlayers } = simulateEntireTournament(t, currPlayers);
+            currTournaments[i] = completedTournament;
+            currPlayers = finalizeTournamentAndDistributePoints(completedTournament, updatedPlayers);
+          }
+        }
+        // Now draw the new week with the freshly updated player rankings!
+        currTournaments = drawTournamentsForWeek(currTournaments, nextTourn.week, currPlayers);
+      }
+
+      const newSeason: SeasonState = {
         ...season,
         currentTournamentIndex: nextIdx,
-      });
+        tournaments: currTournaments,
+      };
+
+      setSeason(newSeason);
+      setPlayers(currPlayers);
+      triggerAutoSave(newSeason, currPlayers);
       setCurrentTab('tournament');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
       // Season completed! Show Year-End transition modal
-      const atpNo1 = players.find((p) => p.tour === 'ATP' && p.rank === 1) || null;
-      const wtaNo1 = players.find((p) => p.tour === 'WTA' && p.rank === 1) || null;
+      const atpNo1 = currPlayers.find((p) => p.tour === 'ATP' && p.rank === 1) || null;
+      const wtaNo1 = currPlayers.find((p) => p.tour === 'WTA' && p.rank === 1) || null;
 
       setTransitionReport({
         year: season.year,
@@ -244,6 +274,26 @@ export function App() {
         wtaChampion: wtaNo1,
       });
     }
+  };
+
+  const handleSimulateUpToWeek = (targetWeek: number) => {
+    const { updatedSeason, updatedPlayers } = simulateSeasonUpToWeek(season, players, targetWeek);
+    setSeason(updatedSeason);
+    setPlayers(updatedPlayers);
+    triggerAutoSave(updatedSeason, updatedPlayers);
+    showSaveToast(`Сезон просимулирован до недели ${targetWeek}`);
+    setCurrentTab('tournament');
+  };
+
+  const handleReturnToCurrentTournament = () => {
+    const activeIdx = season.tournaments.findIndex((t) => !t.isCompleted);
+    if (activeIdx >= 0) {
+      setSeason({
+        ...season,
+        currentTournamentIndex: activeIdx,
+      });
+    }
+    setCurrentTab('tournament');
   };
 
   // Advance to next season year
@@ -339,6 +389,7 @@ export function App() {
           <TournamentBracket
             tournament={currentTournament}
             players={players}
+            currentActiveWeek={currentActiveWeek}
             onSelectMatchToWatch={(match) => {
               setActiveMatchToWatch(match);
               setCurrentTab('match');
@@ -347,6 +398,8 @@ export function App() {
             onSimulateCurrentRound={handleSimulateCurrentRound}
             onSimulateEntireTournament={handleSimulateEntireTournament}
             onNextTournament={handleNextTournament}
+            onSimulateUpToWeek={handleSimulateUpToWeek}
+            onReturnToCurrentTournament={handleReturnToCurrentTournament}
           />
         )}
 
@@ -391,6 +444,7 @@ export function App() {
           <CalendarView
             tournaments={season.tournaments}
             currentTournamentIndex={season.currentTournamentIndex}
+            currentActiveWeek={currentActiveWeek}
             players={players}
             onSelectTournament={(idx) => {
               setSeason({ ...season, currentTournamentIndex: idx });

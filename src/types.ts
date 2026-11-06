@@ -2,7 +2,23 @@ export type TourType = 'ATP' | 'WTA';
 
 export type SurfaceType = 'Hard' | 'Clay' | 'Grass' | 'Indoor Hard' | 'Indoor Clay';
 
-export type TournamentCategory = 'Grand Slam' | 'Masters 1000' | 'WTA 1000' | 'ATP 500' | 'WTA 500' | 'ATP 250' | 'WTA 250' | 'ATP Finals' | 'WTA Finals';
+export type TournamentCategory =
+  | 'Grand Slam'
+  | 'Masters 1000'
+  | 'WTA 1000'
+  | 'ATP 500'
+  | 'WTA 500'
+  | 'ATP 250'
+  | 'WTA 250'
+  | 'ATP Finals'
+  | 'WTA Finals'
+  | 'M15'
+  | 'M25'
+  | 'W15'
+  | 'W35'
+  | 'W50'
+  | 'W75'
+  | 'W100';
 
 export interface PlayerStats {
   serve: number;       // 50-99
@@ -119,6 +135,7 @@ export interface Tournament {
   isCompleted: boolean;
   currentRound: number;
   matches: Match[];
+  isDrawn?: boolean;
   championId?: string;
   runnerUpId?: string;
 }

@@ -566,8 +566,8 @@ export const INITIAL_WTA_PLAYERS: Player[] = [
 ];
 
 export function getInitialPlayers(): Player[] {
-  const atpQualifiers = generateTourQualifiers('ATP', 25, 104);
-  const wtaQualifiers = generateTourQualifiers('WTA', 17, 112);
+  const atpQualifiers = generateTourQualifiers('ATP', 25, 156);
+  const wtaQualifiers = generateTourQualifiers('WTA', 17, 164);
 
   const fullAtp = [...INITIAL_ATP_PLAYERS, ...ADDITIONAL_ATP_PLAYERS, ...atpQualifiers];
   const fullWta = [...INITIAL_WTA_PLAYERS, ...wtaQualifiers];

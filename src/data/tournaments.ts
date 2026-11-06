@@ -1,6 +1,7 @@
 import { Tournament } from '../types';
+import { ITF_TOURNAMENTS_SCHEDULE } from './itfTournaments';
 
-export const INITIAL_TOURNAMENTS_SCHEDULE: Omit<Tournament, 'matches' | 'isCompleted' | 'currentRound' | 'championId' | 'runnerUpId'>[] = [
+const ATP_WTA_SCHEDULE: Omit<Tournament, 'matches' | 'isCompleted' | 'currentRound' | 'championId' | 'runnerUpId'>[] = [
   // --- JANUARY ---
   // Week 1: Brisbane & Auckland
   {
@@ -1319,3 +1320,15 @@ export const INITIAL_TOURNAMENTS_SCHEDULE: Omit<Tournament, 'matches' | 'isCompl
     prizeMoneyPool: 15200000,
   },
 ];
+
+export const INITIAL_TOURNAMENTS_SCHEDULE: Omit<
+  Tournament,
+  'matches' | 'isCompleted' | 'currentRound' | 'championId' | 'runnerUpId'
+>[] = [...ATP_WTA_SCHEDULE, ...ITF_TOURNAMENTS_SCHEDULE]
+  .map((t) => {
+    let size = t.drawSize;
+    if (size === 28) size = 32;
+    else if (size === 48 || size === 56 || size === 96) size = 64;
+    return { ...t, drawSize: size };
+  })
+  .sort((a, b) => a.week - b.week);
