@@ -68,13 +68,11 @@ export const TournamentBracket: React.FC<TournamentBracketProps> = ({
               <span className={`px-2.5 py-0.5 rounded-lg text-xs font-black tracking-wide ${
                 tournament.category === 'Grand Slam'
                   ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                  : tournament.tour === 'WTA' || ['W15', 'W35', 'W50', 'W75', 'W100'].includes(tournament.category)
+                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
                   : tournament.category === 'M15' || tournament.category === 'M25'
                   ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40'
-                  : ['W15', 'W35', 'W50', 'W75', 'W100'].includes(tournament.category)
-                  ? 'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40'
-                  : tournament.tour === 'ATP'
-                  ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
-                  : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                  : 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
               }`}>
                 {tournament.tour} • {tournament.category}
               </span>

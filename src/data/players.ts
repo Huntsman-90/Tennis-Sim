@@ -574,3 +574,24 @@ export function getInitialPlayers(): Player[] {
 
   return [...fullAtp, ...fullWta];
 }
+
+export function syncPlayerBios(players: Player[]): Player[] {
+  const canonical = getInitialPlayers();
+  const canonicalMap = new Map<string, Player>();
+  canonical.forEach((p) => canonicalMap.set(p.id, p));
+
+  return players.map((p) => {
+    const canon = canonicalMap.get(p.id);
+    if (!canon) return p;
+    return {
+      ...p,
+      name: canon.name,
+      nameRu: canon.nameRu,
+      country: canon.country,
+      flag: canon.flag,
+      handedness: canon.handedness,
+      backhandType: canon.backhandType,
+    };
+  });
+}
+

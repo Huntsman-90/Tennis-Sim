@@ -36,23 +36,29 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     if (cat === 'Grand Slam') {
       return 'bg-amber-500/20 text-amber-300 border border-amber-500/40';
     }
-    if (cat === 'Masters 1000' || cat === 'WTA 1000') {
+    // All WTA tournaments (WTA 1000, WTA 500, WTA 250, WTA Finals, W15-W100) in soft pastel pink
+    if (tourn.tour === 'WTA' || isItfWomenCategory(cat) || cat.startsWith('WTA')) {
+      if (cat === 'WTA 1000' || cat === 'WTA Finals') {
+        return 'bg-rose-500/25 text-rose-200 border border-rose-400/50 shadow-sm shadow-rose-500/10';
+      }
+      return 'bg-rose-500/20 text-rose-300 border border-rose-500/40';
+    }
+    if (cat === 'Masters 1000') {
       return 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40';
     }
-    if (cat === 'ATP 500' || cat === 'WTA 500') {
+    if (cat === 'ATP 500') {
       return 'bg-sky-500/20 text-sky-300 border border-sky-500/40';
     }
-    if (cat === 'ATP 250' || cat === 'WTA 250') {
+    if (cat === 'ATP 250') {
       return 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40';
     }
-    if (cat === 'ATP Finals' || cat === 'WTA Finals') {
+    if (cat === 'ATP Finals') {
       return 'bg-purple-500/20 text-purple-300 border border-purple-500/40';
     }
     if (isItfMenCategory(cat)) {
       return 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
     }
-    // ITF Women
-    return 'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40';
+    return 'bg-rose-500/20 text-rose-300 border border-rose-500/40';
   };
 
   const filteredTournamentsWithOriginalIndex = useMemo(() => {

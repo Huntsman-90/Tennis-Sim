@@ -10,7 +10,7 @@ import { SavesModal } from './components/SavesModal';
 import { SeasonTransitionModal } from './components/SeasonTransitionModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { Match, MatchScore, Player, SaveSlot, SeasonState } from './types';
-import { getInitialPlayers } from './data/players';
+import { getInitialPlayers, syncPlayerBios } from './data/players';
 import {
   advanceTournamentMatch,
   drawTournamentsForWeek,
@@ -36,7 +36,10 @@ export function App() {
   const [players, setPlayers] = useState<Player[]>(() => {
     const saved = loadAutoSave();
     if (saved && saved.players && saved.players.length >= 300) {
-      return saved.players;
+      const p25 = saved.players.find((p) => p.id === 'atp-25');
+      if (p25 && p25.name === 'Jiri Lehecka') {
+        return syncPlayerBios(saved.players);
+      }
     }
     return getInitialPlayers();
   });
@@ -44,10 +47,13 @@ export function App() {
   const [season, setSeason] = useState<SeasonState>(() => {
     const initPlayers = getInitialPlayers();
     const saved = loadAutoSave();
-    if (saved && saved.season && saved.season.tournaments?.length >= 200) {
-      const activePlayers = (saved.players && saved.players.length >= 300) ? saved.players : initPlayers;
-      return repairSeasonState(saved.season, activePlayers);
+    if (saved && saved.players && saved.players.length >= 300) {
+      const p25 = saved.players.find((p) => p.id === 'atp-25');
+      if (p25 && p25.name === 'Jiri Lehecka' && saved.season && saved.season.tournaments?.length >= 200) {
+        return repairSeasonState(saved.season, syncPlayerBios(saved.players));
+      }
     }
+    // Clean restart of current season with fresh authentic player roster
     return initializeNewSeason(initPlayers, 2026);
   });
 
@@ -338,9 +344,10 @@ export function App() {
   const handleLoadFromSlot = (slotId: number) => {
     const loaded = loadFromSlot(slotId);
     if (loaded) {
-      const repaired = repairSeasonState(loaded.season, loaded.players);
+      const syncedPlayers = syncPlayerBios(loaded.players);
+      const repaired = repairSeasonState(loaded.season, syncedPlayers);
       setSeason(repaired);
-      setPlayers(loaded.players);
+      setPlayers(syncedPlayers);
       setIsSavesModalOpen(false);
       showSaveToast(`Загружен Слот #${slotId}`);
     }
@@ -352,10 +359,11 @@ export function App() {
   };
 
   const handleImportSave = (impSeason: SeasonState, impPlayers: Player[]) => {
-    const repaired = repairSeasonState(impSeason, impPlayers);
+    const syncedPlayers = syncPlayerBios(impPlayers);
+    const repaired = repairSeasonState(impSeason, syncedPlayers);
     setSeason(repaired);
-    setPlayers(impPlayers);
-    triggerAutoSave(repaired, impPlayers);
+    setPlayers(syncedPlayers);
+    triggerAutoSave(repaired, syncedPlayers);
     showSaveToast('Сохранение успешно импортировано');
   };
 
