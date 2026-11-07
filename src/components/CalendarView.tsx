@@ -6,6 +6,7 @@ interface CalendarViewProps {
   tournaments: Tournament[];
   currentTournamentIndex: number;
   currentActiveWeek?: number;
+  year?: number;
   players: Player[];
   onSelectTournament: (index: number) => void;
 }
@@ -19,6 +20,7 @@ const isItfWomenCategory = (cat: TournamentCategory) =>
 export const CalendarView: React.FC<CalendarViewProps> = ({
   tournaments,
   currentTournamentIndex,
+  year,
   players,
   onSelectTournament,
 }) => {
@@ -123,14 +125,16 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           <div>
             <h2 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2.5">
               <CalIcon className="w-6 h-6 text-emerald-400" />
-              <span>Календарь теннисного сезона</span>
+              <span>Календарь теннисного сезона {year || ''}</span>
             </h2>
             <p className="text-xs text-slate-400 mt-1">
               Единое расписание туров: Grand Slam, ATP & WTA, а также серии ITF Men (M15, M25) и ITF Women (W15–W100)
             </p>
           </div>
 
-          <div className="flex items-center gap-2 text-xs font-medium text-slate-400 bg-slate-800/80 px-3.5 py-2 rounded-2xl border border-slate-700/60 self-start md:self-auto">
+          <div className="flex items-center gap-2 text-xs font-medium text-slate-400 bg-slate-800/80 px-3.5 py-2 rounded-2xl border border-slate-700/60 self-start md:self-auto flex-wrap">
+            <span className="text-emerald-400 font-bold font-mono">Сезон {year || 2026}</span>
+            <span className="text-slate-600">•</span>
             <span>Всего: <strong className="text-white font-mono">{stats.total}</strong> турниров</span>
             <span className="text-slate-600">•</span>
             <span>Текущая неделя: <strong className="text-emerald-400 font-mono">{tournaments[currentTournamentIndex]?.week || 1}</strong></span>

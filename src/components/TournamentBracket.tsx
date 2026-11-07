@@ -8,6 +8,8 @@ interface TournamentBracketProps {
   tournament: Tournament;
   players: Player[];
   currentActiveWeek?: number;
+  isLastTournamentInSeason?: boolean;
+  seasonYear?: number;
   onSelectMatchToWatch: (match: Match) => void;
   onSimulateMatch: (match: Match) => void;
   onSimulateCurrentRound: () => void;
@@ -21,6 +23,8 @@ export const TournamentBracket: React.FC<TournamentBracketProps> = ({
   tournament,
   players,
   currentActiveWeek = 1,
+  isLastTournamentInSeason = false,
+  seasonYear,
   onSelectMatchToWatch,
   onSimulateMatch,
   onSimulateCurrentRound,
@@ -121,9 +125,20 @@ export const TournamentBracket: React.FC<TournamentBracketProps> = ({
               ) : (
                 <button
                   onClick={onNextTournament}
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-bold text-xs sm:text-sm transition flex items-center gap-2 shadow-lg shadow-sky-500/20 cursor-pointer"
+                  className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition flex items-center gap-2 shadow-lg cursor-pointer ${
+                    isLastTournamentInSeason
+                      ? 'bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 shadow-amber-500/20'
+                      : 'bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white shadow-sky-500/20'
+                  }`}
                 >
-                  <span>Следующий турнир по календарю →</span>
+                  {isLastTournamentInSeason ? (
+                    <>
+                      <Trophy className="w-4 h-4 text-slate-950" />
+                      <span>Завершить сезон {seasonYear || ''} и подвести итоги 🏆</span>
+                    </>
+                  ) : (
+                    <span>Следующий турнир по календарю →</span>
+                  )}
                 </button>
               )
             ) : (

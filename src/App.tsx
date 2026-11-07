@@ -17,6 +17,7 @@ import {
   finalizeTournamentAndDistributePoints,
   getCurrentActiveWeek,
   initializeNewSeason,
+  recalculateRankings,
   repairSeasonState,
   simulateEntireTournament,
   simulateSeasonUpToWeek,
@@ -269,9 +270,27 @@ export function App() {
       setCurrentTab('tournament');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
-      // Season completed! Show Year-End transition modal
-      const atpNo1 = currPlayers.find((p) => p.tour === 'ATP' && p.rank === 1) || null;
-      const wtaNo1 = currPlayers.find((p) => p.tour === 'WTA' && p.rank === 1) || null;
+      // Season completed! Finalize any remaining uncompleted tournaments in season
+      for (let i = 0; i < currTournaments.length; i++) {
+        const t = currTournaments[i];
+        if (!t.isCompleted) {
+          const { completedTournament, updatedPlayers } = simulateEntireTournament(t, currPlayers);
+          currTournaments[i] = completedTournament;
+          currPlayers = finalizeTournamentAndDistributePoints(completedTournament, updatedPlayers);
+        }
+      }
+
+      const rankedFinal = recalculateRankings(currPlayers);
+      const atpNo1 = rankedFinal.find((p) => p.tour === 'ATP' && p.rank === 1) || null;
+      const wtaNo1 = rankedFinal.find((p) => p.tour === 'WTA' && p.rank === 1) || null;
+
+      setPlayers(rankedFinal);
+      const finishedSeason: SeasonState = {
+        ...season,
+        tournaments: currTournaments,
+      };
+      setSeason(finishedSeason);
+      triggerAutoSave(finishedSeason, rankedFinal);
 
       setTransitionReport({
         year: season.year,
@@ -317,6 +336,11 @@ export function App() {
       return {
         ...p,
         age: p.age + 1,
+        // Reset single-season counters for the new tennis year
+        titles: 0,
+        matchesWon: 0,
+        matchesLost: 0,
+        // Career counters and 52-week rolling ranking points are preserved: careerTitles, grandSlams, prizeMoney, points, tournamentPoints
         stats: {
           ...p.stats,
           serve: Math.min(99, Math.max(50, p.stats.serve + delta)),
@@ -327,11 +351,15 @@ export function App() {
       };
     });
 
-    const newSeason = initializeNewSeason(evolvedPlayers, nextYear);
+    // Ensure rankings strictly reflect the 52-week rolling points entering the new year
+    const rankedEvolvedPlayers = recalculateRankings(evolvedPlayers);
+
+    const newSeason = initializeNewSeason(rankedEvolvedPlayers, nextYear);
     setSeason(newSeason);
-    setPlayers(evolvedPlayers);
-    triggerAutoSave(newSeason, evolvedPlayers);
+    setPlayers(rankedEvolvedPlayers);
+    triggerAutoSave(newSeason, rankedEvolvedPlayers);
     setCurrentTab('tournament');
+    showSaveToast(`Добро пожаловать в сезон ${nextYear} года!`);
   };
 
   // Save Slots handlers
@@ -398,6 +426,8 @@ export function App() {
             tournament={currentTournament}
             players={players}
             currentActiveWeek={currentActiveWeek}
+            isLastTournamentInSeason={season.currentTournamentIndex === season.tournaments.length - 1}
+            seasonYear={season.year}
             onSelectMatchToWatch={(match) => {
               setActiveMatchToWatch(match);
               setCurrentTab('match');
@@ -453,6 +483,7 @@ export function App() {
             tournaments={season.tournaments}
             currentTournamentIndex={season.currentTournamentIndex}
             currentActiveWeek={currentActiveWeek}
+            year={season.year}
             players={players}
             onSelectTournament={(idx) => {
               setSeason({ ...season, currentTournamentIndex: idx });
