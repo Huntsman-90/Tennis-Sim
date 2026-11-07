@@ -30,7 +30,11 @@ export function calculateSurfaceRating(player: Player, surface: SurfaceType): nu
     player.stats.mental * 0.15
   );
 
-  return baseAverage * affinity * (player.form || 1.0);
+  // Moderate additive adjustments: surface affinity adds ±2-4 rating pts, form adds ±1-2 pts
+  const affinityBonus = (affinity - 1.0) * 12;
+  const formBonus = ((player.form || 1.0) - 1.0) * 15;
+
+  return baseAverage + affinityBonus + formBonus;
 }
 
 export function simulateSinglePoint(
@@ -44,23 +48,53 @@ export function simulateSinglePoint(
 ): PointSimulationResult {
   const servingPlayer = server === 1 ? player1 : player2;
   const receivingPlayer = server === 1 ? player2 : player1;
+  const isAtp = servingPlayer.tour === 'ATP';
+
+  // 1. Tour-specific baseline server win percentage in modern professional tennis
+  // ATP baseline on serve: ~63.5% (hold rate ~81%)
+  // WTA baseline on serve: ~58.5% (hold rate ~70%)
+  const baseServerProb = isAtp ? 0.635 : 0.585;
+
+  // 2. Surface speed modifier
+  // Fast courts (Grass, Indoor) slightly raise serve hold rate; Clay lowers it
+  const surfaceModifier =
+    surface === 'Grass'
+      ? 0.035
+      : surface === 'Indoor Hard'
+      ? 0.020
+      : surface === 'Hard'
+      ? 0.005
+      : -0.035; // Clay gives returners more break chances
+
+  // 3. Skill comparison: Serve vs Return & Baseline Rally
+  const serverServeSkill = servingPlayer.stats.serve;
+  const receiverReturnSkill =
+    receivingPlayer.stats.forehand * 0.4 +
+    receivingPlayer.stats.backhand * 0.4 +
+    receivingPlayer.stats.speed * 0.2;
+  const serveVsReturnDiff = serverServeSkill - receiverReturnSkill;
 
   const serverEffRating = calculateSurfaceRating(servingPlayer, surface);
   const receiverEffRating = calculateSurfaceRating(receivingPlayer, surface);
+  const rallyDiff = serverEffRating - receiverEffRating;
 
-  // Pressure situation (break points, game points, tiebreak)
+  // Calibrated skill gradient: even a large 25-point gap shifts win rate by only ~12-14%
+  const skillEffect = (serveVsReturnDiff * 0.0022) + (rallyDiff * 0.0035);
+
+  // 4. Pressure & Clutch situation (break points, tiebreaks)
   const isPressure = inTiebreak || (currentScoreP1 >= 3 && currentScoreP2 >= 3);
-  const serverClutch = isPressure ? (servingPlayer.stats.clutch / 100) : 1.0;
-  const receiverClutch = isPressure ? (receivingPlayer.stats.clutch / 100) : 1.0;
+  const clutchDiff = (servingPlayer.stats.clutch - receivingPlayer.stats.clutch) * 0.0008;
+  const pressureEffect = isPressure ? clutchDiff : 0;
 
-  // Serve power & Ace probability
-  const surfaceSpeed = surface === 'Grass' ? 1.25 : surface === 'Indoor Hard' ? 1.15 : surface === 'Hard' ? 1.05 : 0.85;
-  const aceChance = ((servingPlayer.stats.serve - 60) / 300) * surfaceSpeed * 0.45;
-  const dfChance = Math.max(0.015, (100 - servingPlayer.stats.mental) / 2000);
+  // 5. Ace & Double Fault chances
+  const surfaceAceMultiplier = surface === 'Grass' ? 1.35 : surface === 'Indoor Hard' ? 1.20 : surface === 'Hard' ? 1.05 : 0.70;
+  const tourAceMultiplier = isAtp ? 1.0 : 0.62;
+  const aceChance = Math.max(0.018, ((servingPlayer.stats.serve - 65) / 250) * 0.26) * surfaceAceMultiplier * tourAceMultiplier;
+  const dfChance = Math.max(0.015, Math.min(0.048, (100 - servingPlayer.stats.mental) / 1000 * 0.45));
 
   const roll = Math.random();
 
-  // 1. Double Fault
+  // Double Fault
   if (roll < dfChance) {
     const pointWinner = server === 1 ? 2 : 1;
     return {
@@ -76,10 +110,11 @@ export function simulateSinglePoint(
     };
   }
 
-  // 2. Ace
+  // Ace
   if (roll < dfChance + aceChance) {
     const pointWinner = server;
-    const speed = Math.round(180 + (servingPlayer.stats.serve - 50) * 1.1 + Math.random() * 15);
+    const baseSpeed = isAtp ? 198 : 172;
+    const speed = Math.round(baseSpeed + (servingPlayer.stats.serve - 70) * 0.8 + Math.random() * 12);
     return {
       winner: pointWinner,
       outcomeType: 'ace',
@@ -96,33 +131,36 @@ export function simulateSinglePoint(
     };
   }
 
-  // 3. Rally simulation
-  const rallyLength = Math.floor(2 + Math.random() * (surface === 'Clay' ? 9 : 5));
-  const serverAdvantage = 1.12 * (servingPlayer.stats.serve / 85);
-  const adjustedServerPower = serverEffRating * serverClutch * serverAdvantage;
-  const adjustedReceiverPower = receiverEffRating * receiverClutch;
+  // 6. Rally outcome: bounded logistic point probability
+  // Guarantees server win prob remains between 44% and 76%, preventing 6-0 and 6-1 blowouts
+  const finalServerWinProb = Math.max(0.44, Math.min(0.76, baseServerProb + surfaceModifier + skillEffect + pressureEffect));
 
-  const serverWinProb = adjustedServerPower / (adjustedServerPower + adjustedReceiverPower);
-  const serverWins = Math.random() < serverWinProb;
+  const serverWins = Math.random() < finalServerWinProb;
   const pointWinner: 1 | 2 = serverWins ? server : (server === 1 ? 2 : 1);
   const winnerPlayer = pointWinner === 1 ? player1 : player2;
 
-  const isWinnerShot = Math.random() < 0.38;
-  const outcomeType = isWinnerShot ? 'winner' : (Math.random() < 0.6 ? 'unforced_error' : 'forced_error');
+  // Rally length based on surface
+  const rallyLength = surface === 'Clay'
+    ? Math.floor(4 + Math.random() * 8)
+    : surface === 'Grass'
+    ? Math.floor(2 + Math.random() * 4)
+    : Math.floor(3 + Math.random() * 6);
+
+  const isWinnerShot = Math.random() < 0.36;
+  const outcomeType = isWinnerShot ? 'winner' : (Math.random() < 0.55 ? 'unforced_error' : 'forced_error');
 
   let desc = '';
   if (outcomeType === 'winner') {
-    const shots = ['мощный форхенд по линии', 'косой кросс с бэкхенда', 'точный укороченный под сетку', 'смэш у сетки'];
+    const shots = ['мощный форхенд по линии', 'косой кросс с бэкхенда', 'точный укороченный под сетку', 'смэш у сетки', 'прострел с задней линии'];
     const chosenShot = shots[Math.floor(Math.random() * shots.length)];
     desc = `Виннер! ${winnerPlayer.nameRu} пробивает ${chosenShot} (розыгрыш ${rallyLength} уд.)`;
   } else if (outcomeType === 'unforced_error') {
     const loser = pointWinner === 1 ? player2 : player1;
-    desc = `Невынужденная ошибка: ${loser.nameRu} посылает мяч в сетку или аут (${rallyLength} уд.)`;
+    desc = `Невынужденная ошибка: ${loser.nameRu} срывает удар в аут (${rallyLength} уд.)`;
   } else {
-    desc = `Вынужденная ошибка после агрессивной атаки от ${winnerPlayer.nameRu}`;
+    desc = `Вынужденная ошибка соперника после острой атаки ${winnerPlayer.nameRu}`;
   }
 
-  // Visual ball trail coordinates
   const ballPath: Array<{ x: number; y: number }> = [
     { x: 50, y: server === 1 ? 90 : 10 },
     { x: 40 + Math.random() * 20, y: 50 },
@@ -164,10 +202,13 @@ export function simulateFullMatch(
   let p1SetsWon = 0;
   let p2SetsWon = 0;
 
+  const isAtp = player1.tour === 'ATP';
+  const baseServeSpeed = isAtp ? 212 : 184;
+
   const stats: MatchDetailedStats = {
     aces: [0, 0],
     doubleFaults: [0, 0],
-    firstServePercentage: [62 + Math.floor(Math.random() * 12), 62 + Math.floor(Math.random() * 12)],
+    firstServePercentage: [62 + Math.floor(Math.random() * 8), 62 + Math.floor(Math.random() * 8)],
     firstServePointsWon: [0, 0],
     secondServePointsWon: [0, 0],
     breakPointsConverted: [0, 0],
@@ -176,8 +217,8 @@ export function simulateFullMatch(
     unforcedErrors: [0, 0],
     totalPointsWon: [0, 0],
     fastestServeKmH: [
-      Math.round(200 + (player1.stats.serve - 70) * 0.8 + Math.random() * 10),
-      Math.round(200 + (player2.stats.serve - 70) * 0.8 + Math.random() * 10),
+      Math.round(baseServeSpeed + (player1.stats.serve - 70) * 0.7 + Math.random() * 8),
+      Math.round(baseServeSpeed + (player2.stats.serve - 70) * 0.7 + Math.random() * 8),
     ],
   };
 
@@ -188,7 +229,7 @@ export function simulateFullMatch(
     let p2Games = 0;
 
     while (true) {
-      // Check set finish
+      // Check set finish (6-4, 6-3, 7-5, etc.)
       if (p1Games >= 6 && p1Games - p2Games >= 2) {
         sets.push([p1Games, p2Games]);
         tiebreaks.push(null);

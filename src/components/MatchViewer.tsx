@@ -63,10 +63,10 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
 
   const logsContainerRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll internal log container only (without shifting browser window)
+  // Auto-scroll internal log container to top so latest event is always visible
   useEffect(() => {
     if (logsContainerRef.current) {
-      logsContainerRef.current.scrollTop = logsContainerRef.current.scrollHeight;
+      logsContainerRef.current.scrollTop = 0;
     }
   }, [pointLogs]);
 
@@ -110,8 +110,8 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
     if (ptResult.outcomeType === 'unforced_error') updatedStats.unforcedErrors[ptResult.winner === 1 ? 1 : 0]++;
     setStats(updatedStats);
 
-    // Add log
-    setPointLogs((prev) => [...prev.slice(-40), ptResult.descriptionRu]);
+    // Add log: newest event at the top (index 0), older events go downwards
+    setPointLogs((prev) => [ptResult.descriptionRu, ...prev.slice(0, 39)]);
 
     // Handle Tiebreak logic
     if (inTiebreak) {
@@ -448,28 +448,46 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
         <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-2">
           <span>Текстовая трансляция розыгрышей</span>
         </h3>
-        <div ref={logsContainerRef} className="max-h-48 overflow-y-auto space-y-1.5 font-mono text-xs text-slate-300 pr-2">
+        <div ref={logsContainerRef} className="max-h-[265px] overflow-y-auto space-y-2 pr-1.5 scrollbar-thin">
           {pointLogs.length === 0 ? (
-            <div className="text-slate-500 italic py-3 text-center">
+            <div className="text-slate-500 italic py-6 text-center text-xs">
               Нажмите «Сыграть 1 розыгрыш» или «Автоигра» для начала матча
             </div>
           ) : (
-            pointLogs.map((log, idx) => (
-              <div
-                key={idx}
-                className={`py-1 px-2.5 rounded-lg ${
-                  log.includes('СЕТ') || log.includes('🏆')
-                    ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30'
-                    : log.includes('Эйс')
-                    ? 'bg-sky-500/15 text-sky-300 font-semibold'
-                    : log.includes('Двойная')
-                    ? 'bg-rose-500/15 text-rose-300'
-                    : 'bg-slate-950/40 text-slate-300'
-                }`}
-              >
-                {log}
-              </div>
-            ))
+            pointLogs.map((log, idx) => {
+              const isLatest = idx === 0;
+              const isSpecial = log.includes('СЕТ') || log.includes('🏆');
+              const isAce = log.includes('Эйс');
+              const isDoubleFault = log.includes('Двойная');
+
+              return (
+                <div
+                  key={idx}
+                  className={`p-3 rounded-2xl transition-all ${
+                    isSpecial
+                      ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30'
+                      : isLatest
+                      ? 'bg-emerald-500/15 text-emerald-100 font-medium border-l-4 border-emerald-400 shadow-sm'
+                      : isAce
+                      ? 'bg-sky-500/15 text-sky-200'
+                      : isDoubleFault
+                      ? 'bg-rose-500/15 text-rose-200'
+                      : 'bg-slate-950/40 text-slate-300'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-xs sm:text-sm font-sans leading-relaxed break-words whitespace-normal flex-1">
+                      {log}
+                    </p>
+                    {isLatest && (
+                      <span className="text-[10px] uppercase font-mono font-bold text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded-md shrink-0">
+                        LIVE
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
       </div>
