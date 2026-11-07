@@ -87,7 +87,9 @@ export const MatchViewer: React.FC<MatchViewerProps> = ({
       server,
       inTiebreak,
       p1Pt,
-      p2Pt
+      p2Pt,
+      currentP1Games,
+      currentP2Games
     );
 
     // Audio SFX

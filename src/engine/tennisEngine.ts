@@ -30,9 +30,9 @@ export function calculateSurfaceRating(player: Player, surface: SurfaceType): nu
     player.stats.mental * 0.15
   );
 
-  // Moderate additive adjustments: surface affinity adds ±2-4 rating pts, form adds ±1-2 pts
-  const affinityBonus = (affinity - 1.0) * 12;
-  const formBonus = ((player.form || 1.0) - 1.0) * 15;
+  // Moderate additive adjustments: surface affinity adds ±1-2 rating pts, form adds ±1 pt
+  const affinityBonus = (affinity - 1.0) * 6;
+  const formBonus = ((player.form || 1.0) - 1.0) * 8;
 
   return baseAverage + affinityBonus + formBonus;
 }
@@ -44,27 +44,29 @@ export function simulateSinglePoint(
   server: 1 | 2,
   inTiebreak: boolean,
   currentScoreP1: number,
-  currentScoreP2: number
+  currentScoreP2: number,
+  currentGamesP1: number = 0,
+  currentGamesP2: number = 0
 ): PointSimulationResult {
   const servingPlayer = server === 1 ? player1 : player2;
   const receivingPlayer = server === 1 ? player2 : player1;
   const isAtp = servingPlayer.tour === 'ATP';
 
   // 1. Tour-specific baseline server win percentage in modern professional tennis
-  // ATP baseline on serve: ~63.5% (hold rate ~81%)
-  // WTA baseline on serve: ~58.5% (hold rate ~70%)
-  const baseServerProb = isAtp ? 0.635 : 0.585;
+  // Calibrated for tight, competitive sets (6-4, 7-5, 7-6) with dominant hold rates for both players
+  // ATP baseline on serve: ~67.0% (hold rate ~88%)
+  // WTA baseline on serve: ~63.5% (hold rate ~80%)
+  const baseServerProb = isAtp ? 0.670 : 0.635;
 
   // 2. Surface speed modifier
-  // Fast courts (Grass, Indoor) slightly raise serve hold rate; Clay lowers it
   const surfaceModifier =
     surface === 'Grass'
-      ? 0.035
-      : surface === 'Indoor Hard'
       ? 0.020
+      : surface === 'Indoor Hard'
+      ? 0.010
       : surface === 'Hard'
       ? 0.005
-      : -0.035; // Clay gives returners more break chances
+      : -0.015; // Clay gives returners slightly more break chances
 
   // 3. Skill comparison: Serve vs Return & Baseline Rally
   const serverServeSkill = servingPlayer.stats.serve;
@@ -78,13 +80,19 @@ export function simulateSinglePoint(
   const receiverEffRating = calculateSurfaceRating(receivingPlayer, surface);
   const rallyDiff = serverEffRating - receiverEffRating;
 
-  // Calibrated skill gradient: even a large 25-point gap shifts win rate by only ~12-14%
-  const skillEffect = (serveVsReturnDiff * 0.0022) + (rallyDiff * 0.0035);
+  // Highly compressed skill gradient: maximum shift is strictly bounded to ±2.0%
+  // This ensures favorites still prevail over a full match, but breaks are hard-fought (0-2 per set)
+  const rawSkillEffect = (serveVsReturnDiff * 0.0003) + (rallyDiff * 0.0005);
+  const skillEffect = Math.max(-0.020, Math.min(0.020, rawSkillEffect));
 
-  // 4. Pressure & Clutch situation (break points, tiebreaks)
+  // 4. Pressure, clutch & trailing game resilience
+  // In pro tennis, a server trailing by a break focuses intensely to avoid falling into a 6-1 or 6-0 deficit
+  const trailingGames = server === 1 ? (currentGamesP2 - currentGamesP1) : (currentGamesP1 - currentGamesP2);
+  const trailingResilience = trailingGames >= 2 ? 0.038 : trailingGames === 1 ? 0.015 : 0;
+
   const isPressure = inTiebreak || (currentScoreP1 >= 3 && currentScoreP2 >= 3);
-  const clutchDiff = (servingPlayer.stats.clutch - receivingPlayer.stats.clutch) * 0.0008;
-  const pressureEffect = isPressure ? clutchDiff : 0;
+  const rawClutchDiff = (servingPlayer.stats.clutch - receivingPlayer.stats.clutch) * 0.0004;
+  const pressureEffect = isPressure ? Math.max(-0.012, Math.min(0.012, rawClutchDiff)) : 0;
 
   // 5. Ace & Double Fault chances
   const surfaceAceMultiplier = surface === 'Grass' ? 1.35 : surface === 'Indoor Hard' ? 1.20 : surface === 'Hard' ? 1.05 : 0.70;
@@ -131,9 +139,11 @@ export function simulateSinglePoint(
     };
   }
 
-  // 6. Rally outcome: bounded logistic point probability
-  // Guarantees server win prob remains between 44% and 76%, preventing 6-0 and 6-1 blowouts
-  const finalServerWinProb = Math.max(0.44, Math.min(0.76, baseServerProb + surfaceModifier + skillEffect + pressureEffect));
+  // 6. Rally outcome: bounded logistic point probability with trailing resilience
+  // Guarantees server win prob remains in high-hold zone, preventing 6-0 and 6-1 blowouts
+  const minProb = isAtp ? 0.60 : 0.57;
+  const maxProb = isAtp ? 0.72 : 0.69;
+  const finalServerWinProb = Math.max(minProb, Math.min(maxProb, baseServerProb + surfaceModifier + skillEffect + pressureEffect + trailingResilience));
 
   const serverWins = Math.random() < finalServerWinProb;
   const pointWinner: 1 | 2 = serverWins ? server : (server === 1 ? 2 : 1);
@@ -249,7 +259,7 @@ export function simulateFullMatch(
         let p2Tb = 0;
 
         while ((p1Tb < 7 && p2Tb < 7) || Math.abs(p1Tb - p2Tb) < 2) {
-          const pt = simulateSinglePoint(player1, player2, surface, server, true, p1Tb, p2Tb);
+          const pt = simulateSinglePoint(player1, player2, surface, server, true, p1Tb, p2Tb, p1Games, p2Games);
           if (pt.winner === 1) {
             p1Tb++;
             stats.totalPointsWon[0]++;
@@ -286,7 +296,7 @@ export function simulateFullMatch(
       const initialServer = server;
 
       while (true) {
-        const pt = simulateSinglePoint(player1, player2, surface, server, false, p1Points, p2Points);
+        const pt = simulateSinglePoint(player1, player2, surface, server, false, p1Points, p2Points, p1Games, p2Games);
         if (pt.winner === 1) {
           p1Points++;
           stats.totalPointsWon[0]++;
